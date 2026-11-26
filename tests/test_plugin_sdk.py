@@ -73,7 +73,10 @@ def test_the_sdk_is_one_mit_file_of_the_standard_library_outside_the_app():
     # Nothing in the app imports it, and the build does not bundle it.
     for path in [ROOT / "main.py", *(ROOT / "src").rglob("*.py")]:
         assert "autona_plugin" not in path.read_text(encoding="utf-8"), path
-    assert "sdk" not in (ROOT / "packaging" / "autona.spec").read_text(encoding="utf-8")
+    spec = (ROOT / "packaging" / "autona.spec").read_text(encoding="utf-8")
+    assert "autona_plugin" not in spec and "sdk/" not in spec and "sdk\\" not in spec
+    # Python 3.8 (an author's interpreter may be old): the syntax parses.
+    ast.parse(source, feature_version=(3, 8))
 
 
 # ── the constants against the contract ──────────────────────────────────
@@ -294,15 +297,17 @@ def _registry_problems(report):
     return sorted((p.code.value, p.scope.value, p.path, p.job) for p in report.problems)
 
 
-def _compare_check(tmp_path, manifest, dev=False, name=None, environ=None):
+def _compare_check(tmp_path, manifest, dev=False, name=None, environ=None, source="manual"):
+    """``source`` "manual" (a zip installed by hand) or None (not known)."""
     folder = _registry_plugin(tmp_path / NON_ASCII / "plugins", manifest, name=name)
     registry = PluginRegistry(
         str(tmp_path / "app"), str(tmp_path / "ud"), HOST, environ=lambda: {},
         which=(lambda _name: None) if environ == {} else shutil.which)
     report = registry.Check(json.loads(json.dumps(manifest)), str(folder),
-                            T.InstallSource("manual"), dev=dev, hostVersion=HOST)
+                            None if source is None else T.InstallSource(source), dev=dev,
+                            hostVersion=HOST)
     sdk = ap.check_manifest(json.loads(json.dumps(manifest)), str(folder), dev=dev,
-                            host_version=HOST, environ=environ)
+                            host_version=HOST, environ=environ, source=source)
     assert _problems(sdk) == _registry_problems(report)
     return sdk
 
@@ -310,6 +315,10 @@ def _compare_check(tmp_path, manifest, dev=False, name=None, environ=None):
 def test_the_example_passes_both_but_its_reserved_id(tmp_path):
     found = _compare_check(tmp_path, _example(), environ={})
     assert _problems(found) == [("id_reserved", "plugin", "id", None)]
+    # Not knowing where it came from, the registry does not hold it.
+    assert _compare_check(tmp_path / "unknown", _example(), environ={}, source=None) == []
+    with pytest.raises(ValueError):
+        ap.check_manifest(_example(), str(tmp_path), source="github")
 
 
 @pytest.mark.parametrize("name, code, job, change", CASES, ids=[case[0] for case in CASES])
@@ -360,6 +369,8 @@ def test_odd_manifests_get_the_registrys_problems(tmp_path, change):
     manifest = _example()
     change(manifest)
     _compare_check(tmp_path, manifest, environ={}, name="taguyan.webhook")
+    _compare_check(tmp_path / "unknown", manifest, environ={}, name="taguyan.webhook",
+                   source=None)
 
 
 def test_the_folder_name_is_the_id_but_in_a_dev_folder(tmp_path):
@@ -489,6 +500,18 @@ def _timeless(events):
     return [event for event in events if event["type"] != "progress"]
 
 
+def _folded(events):
+    """The engine's events as RunResult.events keeps them (a run of progress
+    events folded into its latest)."""
+    folded = []
+    for event in events:
+        if event["type"] == "progress" and folded and folded[-1]["type"] == "progress":
+            folded[-1] = event
+        else:
+            folded.append(event)
+    return folded
+
+
 def _plain(events, run_folder):
     """The events as JSON with the run's folder named <run> (an absolute
     artifact path holds it)."""
@@ -510,7 +533,7 @@ def _both(folder, tmp_path, job="post", mode="ok", cancel_after=None, grace=COOP
     assert (sdk.cancel_requested, sdk.timed_out, sdk.finished_before_cancel) == (
         engine.cancel_requested, engine.timed_out, engine.finished_before_cancel)
     mine = _plain([_sdk_event(event) for event in sdk.events], sdk.folder)
-    theirs = _plain([_engine_event(event) for event in events], prepared.cwd)
+    theirs = _plain(_folded([_engine_event(event) for event in events]), prepared.cwd)
     if timeless:
         mine, theirs = _timeless(mine), _timeless(theirs)
     assert mine == theirs
@@ -811,7 +834,7 @@ def fail(request):
 def slow(request):
     ap.stage("wait")
     while True:
-        request.check_cancel()
+        ap.check_cancel()
         ap.progress(overall=0.5)
         ap.wait_cancel(0.05)
 
@@ -823,6 +846,12 @@ def boom(request):
 
 def secret(request):
     return "secret set" if request.secret("token") == "s3cr3t" else "secret missing"
+
+
+def leak(request):
+    token = request.secret("token")
+    ap.log("token " + token)
+    raise RuntimeError("failed with " + token)
 
 
 if __name__ == "__main__":
@@ -886,6 +915,16 @@ def test_an_sdk_workers_secret_and_describe(sdk_plugin, tmp_path):
     assert report["ok"], report
 
 
+@windows
+def test_an_sdk_worker_masks_its_secret(sdk_plugin, tmp_path):
+    secret = "hunter2-very-secret"
+    sdk, engine, events = _both(sdk_plugin, tmp_path, mode="leak", secrets={"token": secret})
+    assert (engine.state.value, engine.exit_code) == ("failed", 1)
+    assert [event.message for event in events if isinstance(event, T.LogEvent)] == ["token ***"]
+    log = Path(sdk.folder, "worker.log").read_text(encoding="utf-8")
+    assert "RuntimeError: failed with ***" in log and secret not in log
+
+
 # ── the command line ────────────────────────────────────────────────────
 
 def _cli(args, cwd):
@@ -915,3 +954,370 @@ def test_the_command_line_runs_checks_and_refuses(fake_plugin, tmp_path):
     assert json.loads(check.stdout)["ok"] is True
     installed = _cli(["check", str(fake_plugin)], tmp_path)
     assert installed.returncode == 1 and "entry_missing" in installed.stdout
+
+
+# ── the private copies against Autona's own ─────────────────────────────
+
+def test_the_private_copies_are_the_registrys_and_the_schemas():
+    from src.core import PluginRegistry as G
+    assert ap._TOP_KEYS == G._TOP_KEYS
+    assert (ap._FILES_SCOPES, ap._API_USES) == (G._FILES_SCOPES, G._API_USES)
+    for name in ("_ENTRY_HEAD", "_HOST_NAME", "_HTTPS_URL"):
+        assert getattr(ap, name).pattern == getattr(G, name).pattern, name
+    schema = json.loads((ROOT / "docs" / "plugins" / "plugin.schema.json")
+                        .read_text(encoding="utf-8"))
+    assert set(schema["properties"]) == ap._TOP_KEYS
+    permissions = schema["$defs"]["permissions"]["properties"]
+    assert list(ap._FILES_SCOPES) == permissions["files"]["enum"]
+    assert list(ap._API_USES) == permissions["autona_api"]["enum"]
+    assert ap._HOST_NAME.pattern == permissions["network"]["items"]["pattern"]
+    assert ap.PATH_ROOM_MIN == 40
+
+
+def test_the_run_argv_is_plugin_jobs(tmp_path):
+    folder = tmp_path / NON_ASCII / "p"
+    (folder / "bin").mkdir(parents=True)
+    (folder / "main.py").write_text("", encoding="utf-8")
+    (folder / "bin" / "w.exe").write_bytes(b"MZ")
+    absolute = os.path.abspath(os.sep + "tools")
+    for entry, dev in [(["bin/w.exe", "-x"], False), (["bin\\w.exe", "main.py"], False),
+                       (["bin/../../x.exe"], False), ([absolute], False),
+                       (["python", "main.py", "--flag"], True), (["main.py"], True),
+                       (["python", "missing.py"], True), ([absolute, "main.py"], True),
+                       (["bin/../../x.exe"], True)]:
+        engine = J.PluginJobs._Argv(str(folder), entry, dev)
+        sdk = ap._run_argv(str(folder), entry, dev)
+        assert (None if sdk is None else tuple(sdk)) == engine, entry
+
+
+def test_worker_log_stops_at_its_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(ap, "WORKER_LOG_MAX_BYTES", 300)
+    log = ap._WorkerLog(str(tmp_path / "worker.log"))
+    for index in range(50):
+        log.write(f"line {index} " + "x" * 20)
+    log.close()
+    log.write("after the close")
+    data = (tmp_path / "worker.log").read_bytes()
+    assert len(data) <= 300 and data.endswith(log.note.encode("utf-8"))
+    assert data.count(b"reached") == 1 and b"after the close" not in data
+
+
+# ── the values against PluginSettings / PluginSecrets ───────────────────
+
+VALUE_FIELDS = [
+    {"key": "t", "type": "text", "label": "t"},
+    {"key": "ta", "type": "textarea", "label": "ta", "max_length": 5},
+    {"key": "n", "type": "number", "label": "n", "min": 1, "max": 10, "step": 0.5},
+    {"key": "m", "type": "number", "label": "m"},
+    {"key": "b", "type": "bool", "label": "b"},
+    {"key": "s", "type": "select", "label": "s",
+     "options": [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}]},
+    {"key": "f", "type": "file", "label": "f", "extensions": ["png", "txt"]},
+    {"key": "d", "type": "folder", "label": "d"},
+    {"key": "k", "type": "secret", "label": "k"},
+]
+
+
+def test_a_value_is_checked_as_plugin_settings_checks_it(tmp_path):
+    from src.core.PluginSettings import CheckFieldValue, _Empty
+    manifest = _example()
+    manifest["settings"] = VALUE_FIELDS
+    folder = _registry_plugin(tmp_path / NON_ASCII, manifest)
+    report = PluginRegistry(str(tmp_path / "app"), str(tmp_path / "ud"), HOST).Check(
+        manifest, str(folder), None, dev=True, hostVersion=HOST)
+    fields = {field.key: field for field in report.manifest.settings}
+    (tmp_path / "real.png").write_bytes(b"")
+    (tmp_path / "real.TXT").write_bytes(b"")
+    paths = [str(tmp_path / "real.png"), str(tmp_path / "real.TXT"),
+             str(tmp_path / "missing.png"), str(tmp_path), "real.png",
+             "\\\\server\\share\\x.png", "//server/x.png", str(tmp_path / "a\x00.png")]
+    values = ["", "x", "x" * 201, "x" * 6, 0, 1, 1.5, 1.25, 10, 10.5, -1, float("nan"),
+              float("inf"), 10 ** 400, True, False, "a", "c", [], {}, *paths]
+    for raw in VALUE_FIELDS:
+        field = fields[raw["key"]]
+        for value in values:
+            for stored in (False, True):
+                engine = CheckFieldValue(field, value, resolvePick=lambda _kind, pick: pick,
+                                         stored=stored)
+                assert ap.check_field_value(raw, value, stored=stored) == engine, (
+                    raw["key"], value, stored)
+        for value in ("", None, 0, False, "x"):
+            assert ap.is_empty_value(raw, value) == _Empty(field, value), (raw["key"], value)
+
+
+def test_a_secret_value_is_checked_as_plugin_secrets_checks_it():
+    from src.core.PluginSecrets import CheckValue, SecretValueError
+    for value in ("", "a", "a" * 4096, "a" * 4097, "a\nb", "a\tb", "a\x85b", "ü ok", 5, None):
+        try:
+            CheckValue(value)
+            expected = None
+        except SecretValueError as problem:
+            expected = str(problem)
+        assert ap.check_secret_value(value) == expected, value
+
+
+# ── names a zip could not hold (Autona's ZipSafety.NameProblem) ─────────
+
+@pytest.mark.parametrize("name, code", [
+    ("a/b.txt", None), ("a\\b.txt", None), ("dir/", None), ("console.txt", None),
+    ("/abs", "unsafe_path"), ("C:/x", "unsafe_path"), ("a/../b", "unsafe_path"),
+    ("file:stream", "unsafe_path"),
+    ("", "bad_name"), ("a//b", "bad_name"), ("./a", "bad_name"), ("a<b", "bad_name"),
+    ("tab\there", "bad_name"), ("trail.", "bad_name"), ("trail ", "bad_name"),
+    ("LONGFO~1.txt", "bad_name"),
+    ("CON", "reserved_name"), ("nul.txt", "reserved_name"), ("dir/com1.log", "reserved_name"),
+    ("COM0", "reserved_name"), ("LPT¹", "reserved_name"), ("conin$", "reserved_name"),
+    ("名前.txt", "not_ascii"),
+])
+def test_a_zip_name_is_judged_as_zip_safety_judges_it(name, code):
+    assert ap.zip_name_problem(name) == code
+    if code == "not_ascii":
+        assert ap.zip_name_problem(name, ascii_only=False) is None
+
+
+# ── check <folder>: an installed folder against a dev one ───────────────
+
+def _installed_folder(tmp_path, plugin_id="example.fake", manifest=None):
+    manifest = dict(json.loads(json.dumps(manifest or FAKE_MANIFEST)), id=plugin_id,
+                    entry=["bin/w.exe"])
+    folder = tmp_path / NON_ASCII / plugin_id
+    (folder / "bin").mkdir(parents=True)
+    (folder / "bin" / "w.exe").write_bytes(b"MZ")
+    (folder / "plugin.json").write_text(json.dumps(manifest, ensure_ascii=False),
+                                        encoding="utf-8")
+    return folder
+
+
+@pytest.fixture
+def described(monkeypatch):
+    """describe answered without starting anything; the folders it was
+    asked in (the copy's names too)."""
+    seen = []
+
+    def facts(folder, entry, dev, environ=None, timeout=None, poll=0.05):
+        seen.append((folder, sorted(os.listdir(folder))))
+        manifest = json.loads(Path(folder, "plugin.json").read_text(encoding="utf-8"))
+        return {"launched": True, "entry_missing": False, "timed_out": False, "exit_code": 0,
+                "stdout_lines": 1, "seconds": 0.01,
+                "objects": [{"type": "describe", "protocol": [1], "id": manifest["id"],
+                             "version": manifest["version"]}]}
+
+    monkeypatch.setattr(ap, "describe_facts", facts)
+    return seen
+
+
+def _check(folder, **options):
+    return ap.check_folder(str(folder), host_version=HOST, environ={}, **options)
+
+
+def test_an_installed_check_fails_on_names_a_dev_one_notes_them(tmp_path, described):
+    folder = _installed_folder(tmp_path)
+    assert _check(folder)["ok"] and _check(folder, dev=True)["ok"]
+    (folder / "名前.txt").write_bytes(b"")
+    (folder / "a~1.txt").write_bytes(b"")
+    (folder / ".venv" / "名前").mkdir(parents=True)
+    (folder / "__pycache__").mkdir()
+    (folder / "__pycache__" / "x~1.pyc").write_bytes(b"")
+    installed, dev = _check(folder), _check(folder, dev=True)
+    for report in (installed, dev):
+        assert report["non_ascii_names"] == ["名前.txt"]
+        assert report["bad_names"] == [{"path": "a~1.txt", "code": "bad_name"}]
+        assert any("名前.txt" in note for note in report["notes"])
+        assert any("a~1.txt" in note for note in report["notes"])
+    assert not installed["ok"] and dev["ok"]
+
+
+def test_an_installed_check_fails_on_a_long_path_a_dev_one_notes_it(tmp_path, described,
+                                                                      monkeypatch):
+    monkeypatch.setattr(ap, "INSTALLED_PATH_MAX_LENGTH", 90)
+    folder = _installed_folder(tmp_path)
+    (folder / ("d" * 30)).mkdir()
+    (folder / ("d" * 30) / "x.bin").write_bytes(b"")
+    installed, dev = _check(folder), _check(folder, dev=True)
+    assert installed["longest_path"]["autona_dir_room"] == 90 - (21 + 30 + 1 + 5) - 1 < 40
+    assert not installed["ok"] and dev["ok"]
+    assert any("user_data" in note for note in dev["notes"])
+
+
+def test_a_reserved_id_is_noted_unless_installed_by_hand(tmp_path, described):
+    folder = _installed_folder(tmp_path, "taguyan.fake")
+    for report in (_check(folder), _check(folder, dev=True),
+                   _check(folder, dev=True, source="manual")):
+        assert report["ok"] and report["problems"] == []
+        assert any("taguyan." in note for note in report["notes"])
+    manual = _check(folder, source="manual")
+    assert ("id_reserved", "plugin") in {(p["code"], p["scope"]) for p in manual["problems"]}
+    assert not manual["ok"]
+
+
+def test_a_failed_copy_is_a_note_and_a_dev_copy_leaves_dot_folders(tmp_path, described,
+                                                                   monkeypatch):
+    manifest = json.loads(json.dumps(FAKE_MANIFEST))
+    folder = _installed_folder(tmp_path, manifest=manifest)
+    manifest["entry"] = [".tools/w.exe"]
+    (folder / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (folder / ".tools").mkdir()
+    (folder / ".tools" / "w.exe").write_bytes(b"MZ")
+    (folder / ".git").mkdir()
+    (folder / ".git" / "HEAD").write_bytes(b"")
+    described.clear()
+    report = _check(folder, dev=True)
+    assert report["ok"] and report["non_ascii"]["failure"] is None
+    copy_names = described[1][1]
+    assert ".tools" in copy_names and ".git" not in copy_names and "bin" in copy_names
+
+    def broken(*_args, **_kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(ap.shutil, "copytree", broken)
+    report = _check(folder, dev=True)
+    assert report["ok"] and report["non_ascii"] is None
+    assert any("not tried" in note and "disk full" in note for note in report["notes"])
+
+
+# ── run <folder> <job>: values, secrets, the job folder ─────────────────
+
+@pytest.mark.parametrize("options", [
+    {"params": {"mode": 5}}, {"params": {"mode": "x" * 201}},
+    {"settings": {"style": "huge"}}, {"secrets": {"token": "a\nb"}},
+    {"secrets": {"token": ""}}, {"secrets": {"token": "x" * 4097}},
+], ids=["not a string", "too long", "not an option", "a line break", "empty", "too long secret"])
+def test_a_value_autona_would_refuse_is_refused(fake_plugin, tmp_path, options):
+    options = dict(options)
+    with pytest.raises(ap.Refused) as refused:
+        ap.prepare_run(str(fake_plugin), "post", params=options.pop("params", None),
+                       environ=_path_with_python(), work=str(tmp_path / "work"), **options)
+    assert refused.value.reason == "invalid_request"
+
+
+def test_a_failed_preparation_leaves_no_job_folder(fake_plugin, tmp_path):
+    work = tmp_path / "work"
+    with pytest.raises(OSError):
+        ap.prepare_run(str(fake_plugin), "light", trigger="action:result_image",
+                       inputs={"image": str(tmp_path / "missing.png")},
+                       environ=_path_with_python(), work=str(work))
+    assert [path.name for path in work.iterdir()] == ["data"]
+
+
+# ── the run's loop: a slow on_event, a failing one, an interrupt ────────
+
+SPAM = '''\
+import sys
+line = '{"type": "progress", "overall": 0.5}\\n' * 200
+while True:
+    sys.stdout.write(line)
+    sys.stdout.flush()
+'''
+
+
+@windows
+@pytest.mark.parametrize("how", ["timeout", "cancel"])
+def test_a_slow_on_event_does_not_hold_up_the_time_limit_or_the_cancel(tmp_path, how):
+    folder = tmp_path / NON_ASCII
+    folder.mkdir()
+    (folder / "spam.py").write_text(SPAM, encoding="utf-8")
+    prepared = ap.Prepared([sys.executable, str(folder / "spam.py")], str(folder),
+                           dict(os.environ), "heavy", 1.0 if how == "timeout" else None, None,
+                           str(folder / "worker.log"))
+    seen = [0]
+
+    def slow(_event):
+        seen[0] += 1
+        time.sleep(0.001)
+
+    started = time.monotonic()
+    result = ap.execute(prepared, cancel_after=1.0 if how == "cancel" else None, grace=1.0,
+                        on_event=slow, poll=0.02)
+    assert time.monotonic() - started < 15
+    assert seen[0] > 0
+    if how == "timeout":
+        assert (result.state, result.reason, result.timed_out) == ("failed", "timed_out", True)
+    else:
+        assert (result.state, result.cancel_requested) == ("cancelled", True)
+    assert [event["type"] for event in result.events] == ["progress"]
+
+
+def test_the_kept_events_fold_progress_and_stop_at_the_cap(monkeypatch):
+    monkeypatch.setattr(ap, "RESULT_EVENTS_MAX", 3)
+    result = ap.RunResult()
+    kinds = ["progress", "progress", "log", "progress", "progress", "warning", "log", "done"]
+    for index, kind in enumerate(kinds):
+        result.keep({"type": kind, "n": index})
+    assert [(event["type"], event["n"]) for event in result.events] == [
+        ("progress", 1), ("log", 2), ("progress", 4)]
+    assert result.events_dropped == 3 and result.as_dict()["events_dropped"] == 3
+
+
+class _Stop(BaseException):
+    pass
+
+
+@windows
+def test_a_failing_on_event_is_logged_and_an_interrupt_ends_the_worker(fake_plugin, tmp_path):
+    def failing(_event):
+        raise RuntimeError("the host's bug")
+
+    prepared = _prepare(fake_plugin, tmp_path)
+    result = ap.execute(prepared, on_event=failing)
+    assert result.state == "done"
+    log = Path(prepared.log_path).read_text(encoding="utf-8")
+    assert log.count("on_event raised RuntimeError: the host's bug") == 1
+
+    def interrupt(_event):
+        raise _Stop()
+
+    prepared = _prepare(fake_plugin, tmp_path, mode="slow")
+    with pytest.raises(_Stop):
+        ap.execute(prepared, on_event=interrupt)
+    # The worker (its cwd is the job folder) and worker.log are gone.
+    assert "--- exit" in Path(prepared.log_path).read_text(encoding="utf-8")
+    shutil.rmtree(prepared.folder)
+
+
+# ── the worker's helpers in this process ────────────────────────────────
+
+def test_the_worker_api_and_its_per_run_state(tmp_path, monkeypatch, capsys):
+    assert all(hasattr(ap, name) for name in ap.__all__)
+    assert not {"done", "error", "cancelled"} & set(dir(ap))
+    assert not hasattr(ap.Request, "cancelled") and not hasattr(ap.Request, "check_cancel")
+    (tmp_path / "plugin.json").write_text(json.dumps({"id": "a.b", "version": "1.0.0"}),
+                                          encoding="utf-8")
+    monkeypatch.setenv("AUTONA_PLUGIN_DIR", str(tmp_path))
+    ap._terminal["type"] = "done"
+    ap._cancel.set()
+    assert ap.run_worker({}, ["describe"]) == 0
+    assert ap._terminal["type"] is None and not ap.cancel_requested()
+    assert json.loads(capsys.readouterr().out) == {"type": "describe", "protocol": [1],
+                                                   "id": "a.b", "version": "1.0.0"}
+
+
+def test_nan_and_infinity_never_reach_an_event(capsys):
+    ap.progress(float("nan"), float("inf"), 2.5)
+    ap.emit({"type": "log", "message": {"en": "x"}, "extra": [float("-inf")]})
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert lines == [{"type": "progress", "eta": 2.5},
+                     {"type": "log", "message": {"en": "x"}, "extra": [None]}]
+
+
+def test_a_secrets_value_is_masked_in_the_events(monkeypatch, capsys):
+    monkeypatch.setenv("AUTONA_SECRET_TOKEN", "hunter2-long")
+    monkeypatch.setenv("AUTONA_SECRET_SHORT", "short")
+    ap.log({"en": "token hunter2-long, short"})
+    assert json.loads(capsys.readouterr().out)["message"] == {"en": "token ***, short"}
+    assert ap._mask("a hunter2-long b") == "a *** b"
+
+
+@windows
+def test_a_junction_is_a_link_without_isjunction(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_text("x", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    for link in (tmp_path / "link", out / "j"):
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True,
+                       capture_output=True)
+    assert ap._is_link(str(tmp_path / "link")) and not ap._is_link(str(target))
+    assert ap.check_artifact(str(out), "j/a.txt", "text") == (None, "symlink_or_junction")
+    monkeypatch.delattr(os.path, "isjunction", raising=False)
+    assert ap._is_link(str(tmp_path / "link")) and not ap._is_link(str(target))
+    assert ap.check_artifact(str(out), "j/a.txt", "text") == (None, "symlink_or_junction")

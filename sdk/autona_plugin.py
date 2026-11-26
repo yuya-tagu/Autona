@@ -35,7 +35,7 @@ worker. It is two things:
            url = request.secret("webhook_url")
            image = request.input_path("image")
            ...
-           request.check_cancel()          # raises Cancelled after a cancel
+           ap.check_cancel()               # raises Cancelled after a cancel
            if bad:
                raise ap.PluginError("unsupported_host",
                                     {"ja": "送れません", "en": "Cannot post"})
@@ -48,16 +48,23 @@ worker. It is two things:
    ``main`` answers ``describe`` from ``plugin.json`` (under
    ``AUTONA_PLUGIN_DIR``: the id and version are never typed twice), reads
    ``request.json`` for ``run``, sets stdout to UTF-8 with a flush per line,
-   watches stdin for the cancel on a thread, and ends with the protocol's
-   exit code: 0 done, 2 ``PluginError``, 130 ``Cancelled`` (or a cancel
-   seen), 1 any other exception (its traceback on stderr). The event
-   helpers (``stage`` ``progress`` ``log`` ``warning`` ``done`` ``error``
-   ``cancelled``) write one JSON line each; print your own diagnostics to
-   stderr (Autona keeps them in worker.log).
+   watches stdin for the cancel on a thread (a ``cancel`` line or stdin
+   closed: Autona gone), and ends with the protocol's exit code: 0 done, 2
+   ``PluginError``, 130 ``Cancelled``, 1 any other exception (its
+   traceback on stderr). The event helpers (``stage`` ``progress`` ``log``
+   ``warning``, and the terminal ``emit_done`` ``emit_error``
+   ``emit_cancelled``) write one JSON line each; print your own diagnostics
+   to stderr (Autona keeps them in worker.log). The value of every
+   ``AUTONA_SECRET_*`` of 8 characters or more is written as ``***`` in
+   the events and in the traceback ``main`` prints.
+
+   The worker's API is ``__all__``; everything else in this file is the
+   fake host's.
 
 2. **A fake host** (run it)::
 
-       python autona_plugin.py check <folder> [--dev] [--host-version X.Y.Z]
+       python autona_plugin.py check <folder> [--dev] [--source manual]
+           [--host-version X.Y.Z] [--json]
        python autona_plugin.py run <folder> <job> [--params p.json]
            [--input key=path] [--setting k=v] [--secret k=v]
            [--trigger action:<target>|hook:<event>] [--cancel-after N]
@@ -66,11 +73,17 @@ worker. It is two things:
    ``check`` does what Autona checks of a plugin folder (the manifest, every
    code of contract_1.json manifest_checks that a folder alone can show),
    runs ``describe`` and judges it, times it, measures the longest path the
-   folder would make once installed, and runs ``describe`` again from a
-   copy under a folder with a non-ASCII name (TEMP / TMP / APPDATA too).
-   Without ``--dev`` the folder is checked as an installed plugin (the
-   folder's name is the id, the entry is an .exe in it); ``--dev`` checks it
-   as a dev folder (the entry may be ``python worker.py``).
+   folder would make once installed, looks at the names a zip of it would
+   hold, and runs ``describe`` again from a copy under a folder with a
+   non-ASCII name (TEMP / TMP / APPDATA too). It executes your entry (twice,
+   with ``describe``): check only folders you trust. Without ``--dev`` the
+   folder is checked as an installed plugin (the folder's name is the id,
+   the entry is an .exe in it, a long path or a name a zip refuses fails
+   the check); ``--dev`` checks it as a dev folder (the entry may be
+   ``python worker.py``; paths and names are only noted). A ``taguyan.``
+   id is noted (Autona reserves it unless the plugin comes from its own
+   repository); ``--source manual`` checks it as a hand-installed zip,
+   where it is refused. Exit code: 0 OK, 1 not OK.
 
    ``run`` treats the folder as a dev folder: it writes ``request.json``
    into a new job folder (``--work``, else ``<TEMP>/autona-plugin/<id>/``),
@@ -79,11 +92,22 @@ worker. It is two things:
    limit, everything it started ends with it), reads its events with
    Autona's rules and judges the end with Autona's table (appendix A.6).
    ``--cancel-after`` sends the cancel after N seconds; ``--timeout``
-   replaces the job's time limit. Exit code: 0 done, 1 another end, 2 it
-   could not start (the reason is printed).
+   replaces the job's time limit. The values are checked as Autona checks
+   them (a file / folder setting is given as an absolute path). Exit code:
+   0 done, 1 any other end (a worker that could not be launched included:
+   failed / launch_failed), 2 refused or the job folder could not be made
+   (the reason is printed). ``--secret`` puts the value on the command line
+   (your shell's history keeps it): use a test value, not your real one.
 
    Autona's own test suite runs the same fake worker through this fake host
    and through Autona's engine and holds the two to the same results.
+
+   The fake host's API (outside ``__all__``): ``check_folder``
+   ``check_manifest`` ``describe_facts`` ``judge_describe`` ``prepare_run``
+   ``execute`` ``fake_run`` ``cli``, and the rules they are made of:
+   ``parse_event`` ``build_environment`` ``end_state`` ``entry_argv``
+   ``check_artifact`` ``check_field_value`` ``check_secret_value``
+   ``zip_name_problem``.
 
 What this fake host does not do: Autona's lanes (busy), the blocklist,
 consent, installing, hooks' pending / rate limits, the live state (pass a
@@ -94,6 +118,8 @@ in docs/plugins/inputs/), and a hook's job folder removal.
 import argparse
 import hashlib
 import json
+import math
+import ntpath
 import os
 import re
 import shutil
@@ -104,8 +130,18 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 
 SDK_VERSION = "1.0.0"
+
+# The worker's API (the fake host's names are outside it).
+__all__ = [
+    "SDK_VERSION", "PROTOCOL", "Cancelled", "PluginError", "Done", "Request",
+    "setup_stdio", "emit", "stage", "progress", "log", "warning", "artifact", "emit_done",
+    "emit_error", "emit_cancelled", "watch_cancel", "cancel_requested", "check_cancel",
+    "wait_cancel", "plugin_dir", "read_manifest", "describe_answer", "describe",
+    "read_request", "pick_text", "run_worker", "main",
+]
 
 # ── the contract (docs/plugins/contract_1.json; Autona's tests pin these) ──
 
@@ -224,9 +260,24 @@ OUT_DIR = "out"
 # The fake host's own limits (not the contract's).
 DESCRIBE_SLOW_SECONDS = 10.0
 # Room the Autona folder's own path needs (C:\Users\<name>\...\Autona).
+# Only the plugin folder under <Autona>\plugins is measured: a path the
+# plugin makes in its user_data folder (data_dir) is not counted.
 PATH_ROOM_WARN = 80
-PATH_ROOM_MIN = 20
+PATH_ROOM_MIN = 40
 NON_ASCII_FOLDER = "Autona テスト ü"
+# Folders the path and name checks skip (a dev tree's tools and caches).
+SKIPPED_FOLDERS = ("__pycache__",)
+# How many queued stdout lines one look takes before the time limit and
+# the cancel are looked at again, and how many may wait (the reader then
+# waits: the worker's writes block, as they do on a full pipe).
+_TAKE_PER_LOOK = 256
+_QUEUED_LINES_MAX = 1024
+# RunResult.events keeps at most this many (a run of progress events is
+# folded into its latest).
+RESULT_EVENTS_MAX = 10000
+# A secret value shorter than this is not masked (it would mask too much).
+SECRET_MASK_MIN_LENGTH = 8
+SECRET_MASK = "***"
 
 
 # ═══ 1. the worker's helpers ════════════════════════════════════════════
@@ -259,9 +310,10 @@ class Done:
 
 
 _out_lock = threading.Lock()
+# Per run (run_worker resets them): the terminal event written, the cancel.
 _terminal = {"type": None}
 _cancel = threading.Event()
-_watching = {"started": False}
+_watcher = {"thread": None}
 
 
 def setup_stdio():
@@ -275,8 +327,45 @@ def setup_stdio():
                 pass
 
 
+def _secret_values():
+    """The AUTONA_SECRET_* values long enough to mask, longest first."""
+    values = {value for name, value in os.environ.items()
+              if name.upper().startswith(ENV_SECRET_PREFIX)
+              and len(value) >= SECRET_MASK_MIN_LENGTH}
+    return sorted(values, key=len, reverse=True)
+
+
+def _mask(text, secrets=None):
+    """``text`` with every secret value written as ***."""
+    for value in _secret_values() if secrets is None else secrets:
+        text = text.replace(value, SECRET_MASK)
+    return text
+
+
+def _finite(value):
+    """A number JSON can hold: NaN and the infinities are None."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _clean(value, secrets):
+    """An event's value with its strings masked and its non-finite numbers
+    None."""
+    if isinstance(value, str):
+        return _mask(value, secrets) if secrets else value
+    if isinstance(value, dict):
+        return {(_clean(key, secrets) if isinstance(key, str) else key): _clean(item, secrets)
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(item, secrets) for item in value]
+    return _finite(value)
+
+
 def emit(event):
-    """Write one event (a dict with ``type``) as one JSON line and flush."""
+    """Write one event (a dict with ``type``) as one JSON line and flush. A
+    secret's value is written as ***, NaN / infinity as null."""
+    event = _clean(event, _secret_values())
     try:
         line = json.dumps(event, ensure_ascii=False, allow_nan=False)
         line.encode("utf-8")
@@ -302,9 +391,9 @@ def stage(stage, label=None, index=None, count=None):
 
 def progress(fraction=None, overall=None, eta=None, stage=None):
     """Progress: ``fraction`` of the stage and ``overall`` (0 to 1), ``eta``
-    in seconds."""
-    emit(_drop_none({"type": "progress", "stage": stage, "fraction": fraction,
-                     "overall": overall, "eta": eta}))
+    in seconds (NaN / infinity left out)."""
+    emit(_drop_none({"type": "progress", "stage": stage, "fraction": _finite(fraction),
+                     "overall": _finite(overall), "eta": _finite(eta)}))
 
 
 def log(message):
@@ -323,28 +412,29 @@ def artifact(path, kind, label=None):
     return _drop_none({"path": path, "kind": kind, "label": label})
 
 
-def done(summary=None, artifacts=None):
-    """The end: success (then exit 0)."""
+def emit_done(summary=None, artifacts=None):
+    """The terminal event: success (then exit 0)."""
     emit(_drop_none({"type": "done", "summary": summary,
                      "artifacts": list(artifacts) if artifacts else None}))
 
 
-def error(code, message, hint=None):
-    """The end: a failure the user can fix (then exit 2)."""
+def emit_error(code, message, hint=None):
+    """The terminal event: a failure the user can fix (then exit 2)."""
     emit(_drop_none({"type": "error", "code": code, "message": message, "hint": hint}))
 
 
-def cancelled():
-    """The end: stopped on the host's request (then exit 130)."""
+def emit_cancelled():
+    """The terminal event: stopped on the host's request (then exit 130)."""
     emit({"type": "cancelled"})
 
 
 def watch_cancel():
-    """Watch stdin on a daemon thread: a ``cancel`` line or EOF (Autona gone)
-    sets the cancel; other lines are ignored. ``main`` starts it for a run."""
-    if _watching["started"]:
+    """Watch stdin on a daemon thread: a ``cancel`` line or stdin closed
+    (Autona gone) sets the cancel; other lines are ignored. ``main`` starts
+    it for a run (a watcher still reading stdin is kept)."""
+    thread = _watcher["thread"]
+    if thread is not None and thread.is_alive():
         return
-    _watching["started"] = True
 
     def watch():
         try:
@@ -355,17 +445,20 @@ def watch_cancel():
             pass
         _cancel.set()
 
-    threading.Thread(target=watch, name="autona-plugin-cancel", daemon=True).start()
+    thread = threading.Thread(target=watch, name="autona-plugin-cancel", daemon=True)
+    _watcher["thread"] = thread
+    thread.start()
 
 
 def cancel_requested():
-    """Whether the host asked to stop (or stdin closed)."""
+    """Whether the host asked to stop: a ``cancel`` line, or stdin closed
+    (Autona closes it with the cancel, and it closes when Autona is gone)."""
     return _cancel.is_set()
 
 
 def check_cancel():
-    """Raise Cancelled when the host asked to stop. Call it between steps
-    (a send that cannot be taken back may finish first and end ``done``)."""
+    """Raise Cancelled once cancel_requested(). Call it between steps (a
+    send that cannot be taken back may finish first and end ``done``)."""
     if _cancel.is_set():
         raise Cancelled()
 
@@ -419,7 +512,8 @@ class Request:
     """request.json (ADR-009 A.3), read only. The fields are attributes
     (``plugin`` ``job`` ``run_id`` ``trigger`` ``locale`` ``params``
     ``settings`` ``inputs`` ``out_dir`` ``data_dir`` ``host``); ``raw`` is
-    the whole object."""
+    the whole object. The cancel is the module's (cancel_requested,
+    check_cancel, wait_cancel)."""
 
     def __init__(self, raw, path=None):
         self.raw = raw
@@ -457,13 +551,6 @@ class Request:
         ja, the first value)."""
         return pick_text(value, self.locale)
 
-    @property
-    def cancelled(self):
-        return cancel_requested()
-
-    def check_cancel(self):
-        check_cancel()
-
 
 def read_request(path):
     """The Request of ``path`` (UTF-8)."""
@@ -489,8 +576,11 @@ def run_worker(jobs, argv=None):
     """``describe`` or ``run <request.json>`` -> the exit code. ``jobs`` is
     {job id: handler(request)} or one handler for every job. A handler
     returns None (``done``), a Done, or a text (the summary); raises
-    PluginError / Cancelled; or writes its own terminal event."""
+    PluginError / Cancelled; or writes its own terminal event. Each call
+    starts with no terminal event and no cancel."""
     setup_stdio()
+    _terminal["type"] = None
+    _cancel.clear()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv == ["describe"]:
         try:
@@ -505,30 +595,30 @@ def run_worker(jobs, argv=None):
     request = read_request(argv[1])
     handler = jobs if callable(jobs) else jobs.get(request.job)
     if handler is None:
-        error("unknown_job", f"unknown job: {request.job}")
+        emit_error("unknown_job", f"unknown job: {request.job}")
         return 2
     watch_cancel()
     try:
         result = handler(request)
     except Cancelled:
         if _terminal["type"] is None:
-            cancelled()
+            emit_cancelled()
         return _exit_code()
     except PluginError as failure:
         if _terminal["type"] is None:
-            error(failure.code, failure.message, failure.hint)
+            emit_error(failure.code, failure.message, failure.hint)
         return _exit_code()
     except Exception:
-        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write(_mask(traceback.format_exc()))
         sys.stderr.flush()
         return 1
     if _terminal["type"] is None:
         if isinstance(result, Done):
-            done(result.summary, result.artifacts)
+            emit_done(result.summary, result.artifacts)
         elif result is None:
-            done()
+            emit_done()
         else:
-            done(result)
+            emit_done(result)
     return _exit_code()
 
 
@@ -1048,17 +1138,21 @@ class Prepared:
 class RunResult:
     """How a run ended: ``state`` (done / error / failed / cancelled),
     ``reason`` (a failed run's), ``exit_code``, ``events`` (parse_event's
-    dicts, in order), ``final`` (the last terminal event), ``warnings``
-    (the warnings' messages, the first MAX_WARNINGS), ``cancel_requested``,
-    ``timed_out``, ``finished_before_cancel``, ``peak_memory_bytes``,
-    ``rejected`` ([(artifact path, rejection)] of the final artifacts,
-    Autona's checks) and ``folder`` (the job folder)."""
+    dicts, in order: a run of progress events kept as its latest, at most
+    RESULT_EVENTS_MAX in all, ``events_dropped`` counting what that left
+    out -- on_event sees every event), ``final`` (the last terminal event),
+    ``warnings`` (the warnings' messages, the first MAX_WARNINGS),
+    ``cancel_requested``, ``timed_out``, ``finished_before_cancel``,
+    ``peak_memory_bytes``, ``rejected`` ([(artifact path, rejection)] of
+    the final artifacts, Autona's checks) and ``folder`` (the job
+    folder)."""
 
     def __init__(self, **values):
         self.state = None
         self.reason = None
         self.exit_code = None
         self.events = []
+        self.events_dropped = 0
         self.final = None
         self.warnings = []
         self.cancel_requested = False
@@ -1069,6 +1163,16 @@ class RunResult:
         self.folder = None
         self.__dict__.update(values)
 
+    def keep(self, event):
+        """Add a taken event to ``events`` (folded and capped)."""
+        events = self.events
+        if event["type"] == "progress" and events and events[-1]["type"] == "progress":
+            events[-1] = event
+        elif len(events) < RESULT_EVENTS_MAX:
+            events.append(event)
+        else:
+            self.events_dropped += 1
+
     def as_dict(self):
         def plain(event):
             return {key: value for key, value in event.items() if key != "raw"}
@@ -1078,7 +1182,8 @@ class RunResult:
                 "timed_out": self.timed_out,
                 "finished_before_cancel": self.finished_before_cancel,
                 "peak_memory_bytes": self.peak_memory_bytes,
-                "rejected": [list(item) for item in self.rejected], "folder": self.folder}
+                "rejected": [list(item) for item in self.rejected], "folder": self.folder,
+                "events_dropped": self.events_dropped}
 
 
 def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=None,
@@ -1088,7 +1193,12 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
     limit, then marked timed_out -- unless the cancel came first) the
     priority is raised to NORMAL, ``cancel`` written and stdin closed, and
     ``grace`` seconds later the job is ended. ``on_event(event)`` sees each
-    taken event."""
+    taken event; what it raises is written to worker.log (the first time)
+    and the run goes on. A slow on_event does not hold up the time limit or
+    the cancel: the queued lines are taken a few at a time between looks at
+    the clock, and at most _QUEUED_LINES_MAX wait (the worker's writes then
+    block, as on a full pipe). Whatever leaves this early (an interrupt)
+    ends the worker and its job first."""
     result = RunResult(folder=prepared.folder)
     log = _WorkerLog(prepared.log_path)
     memory = (prepared.memory_mb * 1024 * 1024
@@ -1109,7 +1219,17 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
         return result
 
     import queue
-    lines = queue.Queue()
+    lines = queue.Queue(maxsize=_QUEUED_LINES_MAX)
+    stop = threading.Event()
+
+    def put(item):
+        while not stop.is_set():
+            try:
+                lines.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                pass
+        return False
 
     def read_stdout():
         splitter = _Lines()
@@ -1120,13 +1240,13 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
                 if not data:
                     break
                 for item in splitter.feed(data):
-                    lines.put(item)
+                    if not put(item):
+                        return
         except (OSError, ValueError):
             pass
         tail = splitter.flush()
-        if tail is not None:
-            lines.put(tail)
-        lines.put(None)
+        if tail is None or put(tail):
+            put(None)
 
     def read_stderr():
         splitter = _Lines()
@@ -1152,7 +1272,7 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
     out_thread.start()
     err_thread.start()
 
-    state = {"warnings": 0, "final": None}
+    state = {"warnings": 0, "final": None, "on_event_failed": False}
 
     def take(line, size):
         if size > LINE_MAX_BYTES:
@@ -1172,9 +1292,16 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
             result.warnings.append(event["message"])
         if event["type"] in TERMINAL_EVENTS:
             state["final"] = event
-        result.events.append(event)
-        if on_event is not None:
+        result.keep(event)
+        if on_event is None:
+            return
+        try:
             on_event(event)
+        except Exception as problem:
+            if not state["on_event_failed"]:
+                state["on_event_failed"] = True
+                log.write(f"--- the host's on_event raised {type(problem).__name__}: "
+                          f"{problem} ---")
 
     started = clock()
     deadline = None if prepared.timeout is None else started + prepared.timeout
@@ -1182,67 +1309,88 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
     kill_at = None
     cancel_sent = killed = stdout_done = False
     exited_at = peak = None
-    while True:
-        try:
-            item = lines.get(timeout=poll)
-            while True:
-                if item is None:
-                    stdout_done = True
-                else:
+    try:
+        while True:
+            try:
+                item = lines.get(timeout=poll)
+                look_until = clock() + poll
+                taken = 0
+                while True:
+                    if item is None:
+                        stdout_done = True
+                        break
                     take(*item)
-                item = lines.get_nowait()
-        except queue.Empty:
-            pass
-        now = clock()
-        if proc.poll() is None:
-            if (cancel_at is not None and now >= cancel_at and not result.cancel_requested):
-                result.cancel_requested = True
-            if (deadline is not None and not result.timed_out and not result.cancel_requested
-                    and not cancel_sent and now >= deadline):
-                result.timed_out = True
-            if (result.cancel_requested or result.timed_out) and not cancel_sent:
-                cancel_sent = True
-                kill_at = now + grace
+                    taken += 1
+                    if taken >= _TAKE_PER_LOOK or clock() >= look_until:
+                        break
+                    item = lines.get_nowait()
+            except queue.Empty:
+                pass
+            now = clock()
+            if proc.poll() is None:
+                if cancel_at is not None and now >= cancel_at and not result.cancel_requested:
+                    result.cancel_requested = True
+                if (deadline is not None and not result.timed_out
+                        and not result.cancel_requested and not cancel_sent
+                        and now >= deadline):
+                    result.timed_out = True
+                if (result.cancel_requested or result.timed_out) and not cancel_sent:
+                    cancel_sent = True
+                    kill_at = now + grace
+                    if job is not None:
+                        job.set_priority(_NORMAL)
+                    try:
+                        proc.stdin.write(b"cancel\n")
+                        proc.stdin.flush()
+                    except (OSError, ValueError):
+                        pass
+                    try:
+                        proc.stdin.close()
+                    except (OSError, ValueError):
+                        pass
+                if kill_at is not None and now >= kill_at and not killed:
+                    killed = True
+                    log.write("--- stopped by the host ---")
+                    _kill(proc, job)
+                continue
+            if exited_at is None:
+                exited_at = now
                 if job is not None:
-                    job.set_priority(_NORMAL)
-                try:
-                    proc.stdin.write(b"cancel\n")
-                    proc.stdin.flush()
-                except (OSError, ValueError):
-                    pass
-                try:
-                    proc.stdin.close()
-                except (OSError, ValueError):
-                    pass
-            if kill_at is not None and now >= kill_at and not killed:
-                killed = True
-                log.write("--- stopped by the host ---")
-                _kill(proc, job)
-            continue
-        if exited_at is None:
-            exited_at = now
-            if job is not None:
-                peak = job.peak_memory()
-                job.close()
-        if stdout_done or now - exited_at >= 2.0:
-            break
-    while True:  # what was queued after the last look
-        try:
-            item = lines.get_nowait()
-        except queue.Empty:
-            break
-        if item is not None:
+                    peak = job.peak_memory()
+                    job.close()
+            if stdout_done or now - exited_at >= 2.0:
+                break
+        # What was queued after the last look (at most the queue's size).
+        for _ in range(lines.qsize()):
+            try:
+                item = lines.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                break
             take(*item)
+    finally:
+        stop.set()
+        if proc.poll() is None:  # left early: the worker does not outlive the host
+            _kill(proc, job)
+            try:
+                proc.wait(5)
+            except subprocess.TimeoutExpired:
+                pass
+        if job is not None:
+            job.close()
+        out_thread.join(2.0)
+        err_thread.join(2.0)
+        for stream, reader in ((proc.stdin, None), (proc.stdout, out_thread),
+                               (proc.stderr, err_thread)):
+            try:
+                if stream is not None and (reader is None or not reader.is_alive()):
+                    stream.close()
+            except (OSError, ValueError):
+                pass
+        log.write(f"--- exit {proc.returncode} ---")
+        log.close()
     exit_code = proc.returncode
-    err_thread.join(2.0)
-    for stream in (proc.stdin, proc.stdout, proc.stderr):
-        try:
-            if stream is not None and (stream is not proc.stderr or not err_thread.is_alive()):
-                stream.close()
-        except (OSError, ValueError):
-            pass
-    log.write(f"--- exit {exit_code} ---")
-    log.close()
     final = state["final"]
     memory_hit = memory is not None and peak is not None and peak >= memory * _MEMORY_LIMIT_REACHED
     result.state, result.reason = end_state(
@@ -1261,6 +1409,24 @@ def execute(prepared, cancel_after=None, grace=CANCEL_GRACE_SECONDS, on_event=No
     return result
 
 
+_REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+def _is_link(path):
+    """A symbolic link or a junction, as Autona's islink / isjunction (before
+    Python 3.12 os.path has no isjunction: any reparse point counts)."""
+    if os.path.islink(path):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    if isjunction is not None:
+        return isjunction(path)
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT)
+
+
 def check_artifact(out_dir, path, kind):
     """(the real path, None) of an artifact Autona accepts, else (None, the
     rejection): outside out_dir, a link or junction on the way, missing,
@@ -1275,15 +1441,12 @@ def check_artifact(out_dir, path, kind):
     if not _below(base, target):
         return None, "outside_out_dir"
 
-    def is_link(item):
-        return os.path.islink(item) or getattr(os.path, "isjunction", lambda _p: False)(item)
-
     current = base
-    if is_link(current):
+    if _is_link(current):
         return None, "symlink_or_junction"
     for part in os.path.relpath(target, base).split(os.sep):
         current = os.path.join(current, part)
-        if is_link(current):
+        if _is_link(current):
             return None, "symlink_or_junction"
     real = os.path.realpath(target)
     if not _below(os.path.realpath(base), real):
@@ -1546,13 +1709,17 @@ def read_manifest_file(folder):
         return None, unreadable("nested too deep")
 
 
-def check_manifest(raw, folder, dev=False, host_version=None, environ=None):
+def check_manifest(raw, folder, dev=False, host_version=None, environ=None, source=None):
     """Every problem Autona finds in the manifest ``raw`` of ``folder``
     (contract_1.json manifest_checks), as dicts {code, scope, path, job,
     detail}. Without ``dev`` the folder is an installed one (its name is the
-    id, ``taguyan.`` is reserved, the entry is an .exe). ``host_version``:
-    min_autona_newer against it (skipped when None). id_taken needs two
-    folders and is never reported here."""
+    id, the entry is an .exe). ``source``: where an installed folder came
+    from -- None (not known: Autona then does not hold ``taguyan.`` against
+    it) or "manual" (a zip installed by hand: ``taguyan.`` is reserved).
+    ``host_version``: min_autona_newer against it (skipped when None).
+    id_taken needs two folders and is never reported here."""
+    if source not in (None, "manual"):
+        raise ValueError("source: None or 'manual'")
     found = _Found()
     if not isinstance(raw, dict):
         found.plugin("manifest_unreadable", MANIFEST_FILE, "not a JSON object")
@@ -1577,7 +1744,7 @@ def check_manifest(raw, folder, dev=False, host_version=None, environ=None):
         return found.items
     if not dev and os.path.basename(os.path.normpath(folder)) != plugin_id:
         found.plugin("id_folder_mismatch", "id")
-    if plugin_id.startswith(RESERVED_ID_PREFIX) and not dev:
+    if plugin_id.startswith(RESERVED_ID_PREFIX) and not dev and source == "manual":
         found.plugin("id_reserved", "id")
     which = _which(environ)
     _check_top(raw, folder, dev, host_version, which, found)
@@ -1957,16 +2124,28 @@ def usable_jobs(raw, problems):
 
 # ── check <folder> ──
 
+def _skipped(name):
+    return name.startswith(".") or name in SKIPPED_FOLDERS
+
+
+def _walk(folder):
+    """Every name under the folder as its path relative to it, without the
+    folders _skipped leaves out (and what is in them)."""
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [name for name in dirs if not _skipped(name)]
+        for name in dirs + files:
+            yield os.path.relpath(os.path.join(root, name), folder)
+
+
 def longest_path(folder, plugin_id):
     """The longest path the folder makes once installed, relative to the
     Autona folder (``plugins\\<id>\\...``), and the room left for the Autona
-    folder's own path within INSTALLED_PATH_MAX_LENGTH."""
+    folder's own path within INSTALLED_PATH_MAX_LENGTH. Only the plugin
+    folder is measured: what the plugin makes under user_data is not."""
     longest = ""
-    for root, dirs, files in os.walk(folder):
-        for name in dirs + files:
-            rel = os.path.relpath(os.path.join(root, name), folder)
-            if len(rel) > len(longest):
-                longest = rel
+    for rel in _walk(folder):
+        if len(rel) > len(longest):
+            longest = rel
     installed = "\\".join(["plugins", plugin_id or os.path.basename(folder),
                            *longest.split(os.sep)]) if longest else ""
     room = INSTALLED_PATH_MAX_LENGTH - len(installed) - 1
@@ -1976,71 +2155,148 @@ def longest_path(folder, plugin_id):
 def non_ascii_names(folder):
     """Paths under the folder whose names are not ASCII (Autona refuses a
     zip entry name that is not ASCII)."""
-    names = []
-    for root, dirs, files in os.walk(folder):
-        for name in dirs + files:
-            if not name.isascii():
-                names.append(os.path.relpath(os.path.join(root, name), folder))
-    return names
+    return [rel for rel in _walk(folder) if not os.path.basename(rel).isascii()]
+
+
+# Autona's ZipSafety name rules (C.1): a zip entry is refused for these.
+_BAD_CHARS = frozenset('<>:"|?*')
+_RESERVED_NAMES = frozenset(
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+    + [f"COM{digit}" for digit in "0123456789"]
+    + [f"LPT{digit}" for digit in "0123456789"]
+    + [f"COM{digit}" for digit in "¹²³"]
+    + [f"LPT{digit}" for digit in "¹²³"])
+_SHORT_NAME = re.compile(r"~[0-9]")
+
+
+def zip_name_problem(name, ascii_only=True):
+    """A zip entry's name as Autona's ZipSafety.NameProblem sees it: None,
+    or unsafe_path (absolute, a drive, ``..``, a ``:``), bad_name (an empty
+    or ``.`` part, a refused or control character, a trailing dot or space,
+    an NTFS short name's ``~<digit>``), reserved_name (a device name, with
+    or without an extension) or, ``ascii_only``, not_ascii. ``\\`` counts
+    as ``/``; a folder's trailing ``/`` is dropped."""
+    if not isinstance(name, str) or not name:
+        return "bad_name"
+    normalised = name.replace("\\", "/")
+    if normalised.startswith("/") or ":" in normalised:
+        return "unsafe_path"
+    if normalised.endswith("/"):
+        normalised = normalised[:-1]
+    parts = normalised.split("/")
+    if ".." in parts:
+        return "unsafe_path"
+    for part in parts:
+        if part in ("", "."):
+            return "bad_name"
+        if any(ch in _BAD_CHARS or ord(ch) < 32 for ch in part):
+            return "bad_name"
+        if part[-1] in ". " or _SHORT_NAME.search(part):
+            return "bad_name"
+        if part.split(".")[0].upper() in _RESERVED_NAMES:
+            return "reserved_name"
+    if ascii_only and any(ord(ch) > 0x7e for ch in normalised):
+        return "not_ascii"
+    return None
+
+
+def bad_names(folder):
+    """[{path, code}] of the names under the folder a zip of it could not
+    hold (zip_name_problem but not_ascii: non_ascii_names reports those)."""
+    found = []
+    for rel in _walk(folder):
+        code = zip_name_problem(rel.replace(os.sep, "/"), ascii_only=False)
+        if code is not None:
+            found.append({"path": rel, "code": code})
+    return found
 
 
 def check_folder(folder, dev=False, host_version=None, environ=None,
-                 describe_timeout=DESCRIBE_TIMEOUT_SECONDS, try_non_ascii=True):
-    """``check <folder>`` -> a dict: problems (check_manifest's), describe
-    (its facts and judgement, in place), longest_path, non_ascii_names,
-    non_ascii (describe again from a copy under a non-ASCII folder, with
-    TEMP / TMP / APPDATA / LOCALAPPDATA there too), notes (the fake host's
-    own warnings) and ok."""
+                 describe_timeout=DESCRIBE_TIMEOUT_SECONDS, try_non_ascii=True, source=None):
+    """``check <folder>`` -> a dict: problems (check_manifest's; ``source``
+    as there), describe (its facts and judgement, in place), longest_path,
+    non_ascii_names, bad_names, non_ascii (describe again from a copy under
+    a non-ASCII folder, with TEMP / TMP / APPDATA / LOCALAPPDATA there too;
+    None when not tried or the copy failed), notes (the fake host's own
+    warnings) and ok. It runs the entry (``describe``, twice). An installed
+    folder (not ``dev``) is not ok with fewer than PATH_ROOM_MIN characters
+    left for the Autona folder, a name that is not ASCII or a bad name; a
+    dev folder only notes them. Folders named with a leading dot and
+    __pycache__ are not looked at (leave them out of the zip)."""
     folder = os.path.abspath(folder)
     environ = dict(os.environ if environ is None else environ)
     report = {"folder": folder, "dev": dev, "problems": [], "describe": None,
-              "longest_path": None, "non_ascii_names": [], "non_ascii": None, "notes": [],
-              "ok": False}
+              "longest_path": None, "non_ascii_names": [], "bad_names": [], "non_ascii": None,
+              "notes": [], "ok": False}
+    notes = report["notes"]
     raw, unreadable = read_manifest_file(folder)
     report["problems"] = ([unreadable] if unreadable else
                           check_manifest(raw, folder, dev=dev, host_version=host_version,
-                                         environ=environ))
+                                         environ=environ, source=source))
     usable = plugin_usable(report["problems"])
     if isinstance(raw, dict):
         plugin_id = raw.get("id") if isinstance(raw.get("id"), str) else None
         report["longest_path"] = longest_path(folder, plugin_id)
         report["non_ascii_names"] = non_ascii_names(folder)
+        report["bad_names"] = bad_names(folder)
         room = report["longest_path"]["autona_dir_room"]
         if room < PATH_ROOM_WARN:
-            report["notes"].append(
-                f"the longest installed path leaves {room} characters for the Autona folder "
-                f"(fewer than {PATH_ROOM_WARN})")
+            fails = "" if dev else f"; fewer than {PATH_ROOM_MIN} fails the check"
+            notes.append(f"the longest installed path leaves {room} characters for the Autona "
+                         f"folder (fewer than {PATH_ROOM_WARN}{fails}; paths the plugin makes "
+                         f"under user_data are not counted)")
         for name in report["non_ascii_names"]:
-            report["notes"].append(f"a name that is not ASCII (a zip refuses it): {name}")
+            notes.append(f"a name that is not ASCII (a zip refuses it): {name}")
+        for item in report["bad_names"]:
+            notes.append(f"a name a zip refuses ({item['code']}): {item['path']}")
+        if (plugin_id and plugin_id.startswith(RESERVED_ID_PREFIX)
+                and (dev or source != "manual")):
+            notes.append(f"the id starts with {RESERVED_ID_PREFIX}: Autona reserves it for its "
+                         f"own plugins (a zip installed by hand is refused; see --source "
+                         f"manual)")
     if usable:
         entry = raw["entry"]
         facts = describe_facts(folder, entry, dev, environ, describe_timeout)
         report["describe"] = dict(facts, **judge_describe(facts, raw))
         if facts["seconds"] is not None and facts["seconds"] > DESCRIBE_SLOW_SECONDS:
-            report["notes"].append(f"describe took {facts['seconds']} s (keep it light: "
-                                   f"Autona waits {DESCRIBE_TIMEOUT_SECONDS} s)")
+            notes.append(f"describe took {facts['seconds']} s (keep it light: Autona waits "
+                         f"{DESCRIBE_TIMEOUT_SECONDS} s)")
         if try_non_ascii:
             report["non_ascii"] = _describe_non_ascii(folder, entry, dev, environ, raw,
-                                                      describe_timeout)
+                                                      describe_timeout, notes)
     blocking = [p for p in report["problems"] if p["scope"] != "warning"]
+    installed_ok = dev or (
+        (report["longest_path"] is None
+         or report["longest_path"]["autona_dir_room"] >= PATH_ROOM_MIN)
+        and not report["non_ascii_names"] and not report["bad_names"])
     report["ok"] = bool(
         usable and not blocking and report["describe"]
         and report["describe"]["failure"] is None
         and (report["non_ascii"] is None or report["non_ascii"]["failure"] is None)
-        and (report["longest_path"] is None
-             or report["longest_path"]["autona_dir_room"] >= PATH_ROOM_MIN)
-        and not report["non_ascii_names"])
+        and installed_ok)
     return report
 
 
-def _describe_non_ascii(folder, entry, dev, environ, raw, timeout):
+def _describe_non_ascii(folder, entry, dev, environ, raw, timeout, notes):
     base = tempfile.mkdtemp(prefix="autona-plugin-check-")
     try:
         parent = os.path.join(base, NON_ASCII_FOLDER)
         temp = os.path.join(parent, "Temp テンポラリ")
         os.makedirs(temp)
         copy = os.path.join(parent, os.path.basename(folder))
-        shutil.copytree(folder, copy, symlinks=True)
+        keep = os.path.normcase(re.split(r"[/\\]", entry[0])[0]) if entry else ""
+
+        def ignore(where, names):
+            # A dev tree's .venv / .git / caches stay behind (but the folder
+            # the entry starts in, a .venv's python, say).
+            if not dev:
+                return []
+            top = os.path.normcase(os.path.abspath(where)) == os.path.normcase(folder)
+            return [name for name in names if _skipped(name)
+                    and os.path.isdir(os.path.join(where, name))
+                    and not (top and os.path.normcase(name) == keep)]
+
+        shutil.copytree(folder, copy, symlinks=True, ignore=ignore)
         env = dict(environ)
         for name in ("TEMP", "TMP", "APPDATA", "LOCALAPPDATA"):
             for key in [k for k in env if k.upper() == name]:
@@ -2048,9 +2304,10 @@ def _describe_non_ascii(folder, entry, dev, environ, raw, timeout):
             env[name] = temp
         facts = describe_facts(copy, entry, dev, env, timeout)
         return dict(facts, folder=copy, **judge_describe(facts, raw))
-    except OSError as problem:
-        return {"failure": "launch_failed", "detail": f"copy failed: {problem}",
-                "launched": False}
+    except (OSError, shutil.Error) as problem:
+        notes.append(f"describe from a non-ASCII folder was not tried: the copy failed "
+                     f"({type(problem).__name__}: {problem})")
+        return None
     finally:
         shutil.rmtree(base, ignore_errors=True)
 
@@ -2144,6 +2401,122 @@ def _setting_value(field, text):
     return text
 
 
+# ── the values (Autona's PluginSettings.CheckFieldValue / _Empty and
+#    PluginSecrets.CheckValue, the parts that need no picker) ──
+
+def _max_length(field):
+    default = TEXT_MAX_LENGTH["textarea_default" if field.get("type") == "textarea"
+                              else "text_default"]
+    limit = field.get("max_length")
+    limit = limit if limit is not None else default
+    return min(int(limit), TEXT_MAX_LENGTH["cap"])
+
+
+def _is_absolute_local(path):
+    """An absolute path on a drive of this PC: no UNC (``\\\\server``,
+    ``//server``, ``\\\\?\\``), on Windows a drive letter."""
+    if not isinstance(path, str) or not path or "\x00" in path:
+        return False
+    if path.startswith(("\\\\", "//")):
+        return False
+    if sys.platform == "win32":
+        drive = ntpath.splitdrive(path)[0]
+        return len(drive) == 2 and drive[1] == ":" and ntpath.isabs(path)
+    return os.path.isabs(path)
+
+
+def _finite_number(value):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too large for a float
+        return False
+
+
+def _on_step(field, value):
+    step = field.get("step")
+    if step is None or step <= 0:
+        return True
+    base = field.get("min") if field.get("min") is not None else 0
+    try:
+        ratio = (value - base) / step
+        return abs(ratio - round(ratio)) <= 1e-9 * max(1.0, abs(ratio))
+    except (OverflowError, ValueError):
+        return False
+
+
+def is_empty_value(field, value):
+    """Unset: None, or an empty text (a text field's "" is no value)."""
+    return value is None or (field.get("type") in ("text", "textarea") and value == "")
+
+
+def check_field_value(field, value, stored=False):
+    """(True, the value to keep) or (False, why) for a value field (its
+    manifest dict) and a value that is not None, as Autona checks it. The
+    fake host has no picker: a file / folder value is the absolute path
+    itself, looked for on the disk unless ``stored`` (a kept value, a
+    default). A secret or a source type is never a value here."""
+    kind = field.get("type")
+    if kind in ("text", "textarea"):
+        if not isinstance(value, str):
+            return False, "not a string"
+        if len(value) > _max_length(field):
+            return False, "too long"
+        return True, value
+    if kind == "number":
+        if not _finite_number(value):
+            return False, "not a number"
+        if field.get("min") is not None and value < field["min"]:
+            return False, "below min"
+        if field.get("max") is not None and value > field["max"]:
+            return False, "above max"
+        if not _on_step(field, value):
+            return False, "not on step"
+        return True, value
+    if kind == "bool":
+        if not isinstance(value, bool):
+            return False, "not a boolean"
+        return True, value
+    if kind == "select":
+        if not isinstance(value, str) or value not in {
+                option.get("value") for option in field.get("options") or []}:
+            return False, "not an option"
+        return True, value
+    if kind in ("file", "folder"):
+        if not isinstance(value, str) or not value:
+            return False, "not a pick id"
+        if not _is_absolute_local(value):
+            return False, "not an absolute local path"
+        path = os.path.normpath(value)
+        if kind == "file":
+            if os.path.splitext(path)[1][1:].lower() not in (field.get("extensions") or []):
+                return False, "extension not allowed"
+            if not stored and not os.path.isfile(path):
+                return False, "not a file"
+        elif not stored and not os.path.isdir(path):
+            return False, "not a folder"
+        return True, path
+    if kind == "secret":
+        return False, "a secret"
+    return False, "not a value type"
+
+
+def check_secret_value(value):
+    """None for a secret value Autona keeps (a string of 1 to
+    SECRET_MAX_LENGTH characters, no line break or other control
+    character), else why not."""
+    if not isinstance(value, str):
+        return "a secret is a string"
+    if not value:
+        return "a secret is not empty (clear it instead)"
+    if len(value) > SECRET_MAX_LENGTH:
+        return f"a secret is at most {SECRET_MAX_LENGTH} characters"
+    if any(unicodedata.category(mark) == "Cc" for mark in value):
+        return "a secret has no line break or control character"
+    return None
+
+
 def _parse_trigger(text, job_id):
     if not text or text == "manual":
         return {"kind": "manual"}
@@ -2160,8 +2533,11 @@ def prepare_run(folder, job, params=None, inputs=None, settings=None, secrets=No
                 environ=None, api_url=None):
     """The run's job folder, inputs and request.json, as Autona's PluginJobs
     makes them for a dev plugin -> Prepared; Refused when Autona would not
-    start it. ``params`` {key: value} (the form's values), ``inputs`` {key:
-    file path}, ``settings`` {key: value or text}, ``secrets`` {key: value},
+    start it (a value that does not fit its field included: check_field_value,
+    check_secret_value). ``params`` {key: value} (the form's values; a file
+    / folder value an absolute path), ``inputs`` {key: file path},
+    ``settings`` {key: value, or a text for a number / bool}, ``secrets``
+    {key: value},
     ``trigger`` "manual" / "action:<target>" / "hook:<event>", ``timeout``
     replaces the job's limit, ``work`` the folder for the job folders
     (default <TEMP>/autona-plugin/<id>)."""
@@ -2206,13 +2582,21 @@ def prepare_run(folder, job, params=None, inputs=None, settings=None, secrets=No
     if unknown:
         raise Refused("invalid_request", f"unknown param: {', '.join(sorted(unknown))}")
     values = {}
-    for field in value_fields:
-        value = params.get(field["key"])
-        if value is None:
+    for field in value_fields:  # Autona's check of a start's values
+        key = field["key"]
+        value = params.get(key)
+        defaulted = is_empty_value(field, value)
+        if defaulted:
             value = field.get("default")
-        if value is None and field.get("required"):
-            raise Refused("invalid_request", f"{field['key']} is required")
-        values[field["key"]] = value
+        if is_empty_value(field, value):
+            if field.get("required"):
+                raise Refused("invalid_request", f"{key}: required")
+            values[key] = value
+            continue
+        ok, kept = check_field_value(field, value, stored=defaulted)
+        if not ok:
+            raise Refused("invalid_request", f"{key}: {kept}")
+        values[key] = kept
 
     setting_fields = raw.get("settings", [])
     settings = dict(settings or {})
@@ -2221,23 +2605,29 @@ def prepare_run(folder, job, params=None, inputs=None, settings=None, secrets=No
     for key in settings:
         if key not in known or known[key]["type"] == "secret":
             raise Refused("invalid_request", f"not a setting: {key} (a secret: --secret)")
-    for key in secrets:
+    for key, value in secrets.items():
         if key not in known or known[key]["type"] != "secret":
             raise Refused("invalid_request", f"not a secret setting: {key}")
+        why = check_secret_value(value)
+        if why is not None:
+            raise Refused("invalid_request", f"{key}: {why}")
     setting_values, missing = {}, []
-    for field in setting_fields:
+    for field in setting_fields:  # Autona's Save, then Get and Missing
         key = field["key"]
         if field["type"] == "secret":
-            value = secrets.get(key)
-            if not value and field.get("required"):
+            if key not in secrets and field.get("required"):
                 missing.append(key)
             continue
         value = settings.get(key)
-        if isinstance(value, str):
+        if isinstance(value, str) and field["type"] in ("number", "bool"):
             value = _setting_value(field, value)
-        if value is None:
+        if not is_empty_value(field, value):
+            ok, value = check_field_value(field, value)
+            if not ok:
+                raise Refused("invalid_request", f"{key}: {value}")
+        if is_empty_value(field, value):
             value = field.get("default")
-        if value is None and field.get("required"):
+        if field.get("required") and is_empty_value(field, value):
             missing.append(key)
         setting_values[key] = value
     if missing:
@@ -2264,41 +2654,7 @@ def prepare_run(folder, job, params=None, inputs=None, settings=None, secrets=No
             raise Refused("invalid_request", f"{key} is not filled")
 
     plugin_id = raw["id"]
-    work = os.path.abspath(work or os.path.join(tempfile.gettempdir(), "autona-plugin",
-                                                plugin_id))
-    os.makedirs(work, exist_ok=True)
-    run_id, run_folder = _new_run_folder(work)
-    inputs_dir = os.path.join(run_folder, INPUTS_DIR)
-    out_dir = os.path.join(run_folder, OUT_DIR)
-    data_dir = os.path.join(work, "data")
-    os.makedirs(inputs_dir)
-    os.makedirs(out_dir)
-    os.makedirs(data_dir, exist_ok=True)
-    placed = {}
-    for field in source_fields:
-        key, kind = field["key"], field["type"]
-        if key in inputs:
-            placed[key] = _place_input(key, kind, inputs[key], inputs_dir)
-        elif fills is not None and kind == "match_log":
-            placed[key] = _place_input(key, kind, None, inputs_dir)  # an empty day
-        else:
-            placed[key] = None
-
-    protocols = set(raw["protocol"]) & set(HOST_SPEAKS_PROTOCOLS)
-    protocol = max(protocols)
-    request = {
-        "protocol": protocol, "plugin": plugin_id, "job": job, "run_id": run_id,
-        "trigger": trig, "locale": "ja" if (locale or "").lower().startswith("ja") else "en",
-        "params": values, "settings": setting_values, "inputs": placed,
-        "out_dir": out_dir, "data_dir": data_dir,
-        "host": {"name": "Autona", "version": host_version or raw["min_autona"]},
-    }
-    request_path = os.path.join(run_folder, REQUEST_FILE)
-    try:
-        _write_json(request_path, request)
-    except (TypeError, ValueError):
-        raise Refused("invalid_request", "a value is not JSON") from None
-
+    protocol = max(set(raw["protocol"]) & set(HOST_SPEAKS_PROTOCOLS))
     if timeout is None:
         timeout = spec["timeout_seconds"]
         if trig["kind"] == "hook":
@@ -2308,6 +2664,42 @@ def prepare_run(folder, job, params=None, inputs=None, settings=None, secrets=No
         secrets={ENV_SECRET_PREFIX + key.upper(): value for key, value in secrets.items()},
         api_url=api_url if raw["permissions"].get("autona_api") in ("read", "write") else None)
     argv = _resolve_command(_run_argv(folder, raw["entry"], True), env)
+
+    work = os.path.abspath(work or os.path.join(tempfile.gettempdir(), "autona-plugin",
+                                                plugin_id))
+    os.makedirs(work, exist_ok=True)
+    run_id, run_folder = _new_run_folder(work)
+    inputs_dir = os.path.join(run_folder, INPUTS_DIR)
+    out_dir = os.path.join(run_folder, OUT_DIR)
+    data_dir = os.path.join(work, "data")
+    request_path = os.path.join(run_folder, REQUEST_FILE)
+    try:
+        os.makedirs(inputs_dir)
+        os.makedirs(out_dir)
+        os.makedirs(data_dir, exist_ok=True)
+        placed = {}
+        for field in source_fields:
+            key, kind = field["key"], field["type"]
+            if key in inputs:
+                placed[key] = _place_input(key, kind, inputs[key], inputs_dir)
+            elif fills is not None and kind == "match_log":
+                placed[key] = _place_input(key, kind, None, inputs_dir)  # an empty day
+            else:
+                placed[key] = None
+        request = {
+            "protocol": protocol, "plugin": plugin_id, "job": job, "run_id": run_id,
+            "trigger": trig, "locale": "ja" if (locale or "").lower().startswith("ja") else "en",
+            "params": values, "settings": setting_values, "inputs": placed,
+            "out_dir": out_dir, "data_dir": data_dir,
+            "host": {"name": "Autona", "version": host_version or raw["min_autona"]},
+        }
+        try:
+            _write_json(request_path, request)
+        except (TypeError, ValueError):
+            raise Refused("invalid_request", "a value is not JSON") from None
+    except BaseException:
+        shutil.rmtree(run_folder, ignore_errors=True)  # no half-made job folder is left
+        raise
     return Prepared(argv=[*argv, "run", request_path], cwd=run_folder, env=env, lane=lane,
                     timeout=timeout, memory_mb=spec.get("memory_mb"),
                     log_path=os.path.join(run_folder, LOG_FILE), request=request,
@@ -2383,7 +2775,9 @@ def _print_check(report):
 
 
 def cli(argv=None):
-    """The fake host's command line -> the exit code."""
+    """The fake host's command line -> the exit code: check 0 OK / 1 not
+    OK; run 0 done / 1 any other end (launch_failed included) / 2 refused
+    or the job folder could not be made."""
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
             try:
@@ -2397,6 +2791,8 @@ def cli(argv=None):
     check = sub.add_parser("check", help="check a plugin folder")
     check.add_argument("folder")
     check.add_argument("--dev", action="store_true", help="check it as a dev folder")
+    check.add_argument("--source", choices=("manual",),
+                       help="check it as installed by hand from a zip (taguyan. is refused)")
     check.add_argument("--host-version", help="report min_autona against this Autona version")
     check.add_argument("--json", action="store_true", help="print the report as JSON")
     run = sub.add_parser("run", help="run a job as Autona does")
@@ -2405,7 +2801,8 @@ def cli(argv=None):
     run.add_argument("--params", help="a JSON file of the job's values")
     run.add_argument("--input", action="append", metavar="KEY=PATH")
     run.add_argument("--setting", action="append", metavar="KEY=VALUE")
-    run.add_argument("--secret", action="append", metavar="KEY=VALUE")
+    run.add_argument("--secret", action="append", metavar="KEY=VALUE",
+                     help="a secret setting (your shell's history keeps it: use a test value)")
     run.add_argument("--trigger", metavar="action:<target>|hook:<event>")
     run.add_argument("--cancel-after", type=float, metavar="N")
     run.add_argument("--timeout", type=float, metavar="N")
@@ -2416,7 +2813,8 @@ def cli(argv=None):
     args = parser.parse_args(argv)
 
     if args.command == "check":
-        report = check_folder(args.folder, dev=args.dev, host_version=args.host_version)
+        report = check_folder(args.folder, dev=args.dev, host_version=args.host_version,
+                              source=args.source)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
