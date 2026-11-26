@@ -13,29 +13,39 @@ PluginInstaller.
   checked, unpacked to ``<id>.new``, its manifest checked; the upload's file
   removed whatever happens), then CONSENT with the sheet (PendingInstall).
   Consent compares the page's digest with the pending one's (D6: the page
-  consents to what it showed) and runs the commit as a job (describe in
-  .new, the swap, install.json), then ``registry.Scan()`` and
-  ``hooks.Refresh()``: DONE. A commit refused because a run of the plugin
-  goes (RUNNING) keeps the install pending: back to CONSENT with the
-  failure. A new install while one waits for consent discards the waiting
-  one. Cancel discards the sheet; one cancelled while preparing is
-  discarded when its job ends (a new install waits for that job).
+  consents to what it showed) and runs the commit as a job: the plugin's
+  starts held (PluginJobs.Hold), the commit (the staged plugin.json checked
+  against the sheet again, describe in .new, the swap, install.json),
+  ``registry.Scan()`` and ``hooks.Refresh()``, then the hold given back --
+  so no run starts from the old manifest after the swap: DONE. A commit
+  refused because a run of the plugin goes (RUNNING) keeps the install
+  pending: back to CONSENT with the failure. A new install while one waits
+  for consent discards the waiting one. Cancel discards the sheet; one
+  cancelled while preparing is discarded when its job ends (a new install
+  waits for that job).
 - **The enable** (``SetEnabled``): an installed plugin only (never the
-  built-in or a dev one); a disable cancels its runs (its pending hooks
-  are discarded when they would start: contract hooks.disabled_reasons).
+  built-in or a dev one). A disable is held (PluginJobs.Hold): written,
+  its runs cancelled, then given back -- a start planned before the write
+  is refused at its lane (its pending hooks are discarded when they would
+  start: contract hooks.disabled_reasons).
 - **A removal** (``StartRemoval``): a job -- the plugin's starts held
   (PluginJobs.Hold: no run, no pending hook starts), its runs cancelled and
   waited for (up to REMOVAL_WAIT_SECS: the cancel's grace and the job
-  object), PluginInstaller.Remove (which forgets the hooks, REMOVED), then
-  ``registry.Scan()`` and ``hooks.Refresh()``. ``Removal`` answers what it
-  would remove and how the last one went.
+  object; a run writing its folder counts), PluginInstaller.Remove (which
+  forgets the hooks, REMOVED), ``registry.Scan()`` and ``hooks.Refresh()``,
+  then the hold given back. ``Removal`` answers what it would remove and
+  how the last one went -- a failed one also once the plugin left the list
+  (a partial removal), and it can be asked again.
+- One change of a plugin at a time: its commit, its removal and its enable
+  refuse each other (BUSY).
 - **The blocklist** (``SetBlocklist`` / ``Blocklist`` / ``BlockedReason``):
   the rows in effect (``ReadListingBlocklist``: the previous copy
   ``user_data/plugins/_listing.json``, else the copy shipped with Autona;
   fetching it is P5b's). The registry's ``blockedBy`` and the installer's
   ``blocklist`` read them; an installed plugin newly matching has its runs
-  cancelled and its hooks forgotten (BLOCKED). A dev folder and the
-  built-in are never blocked.
+  cancelled (under a hold, as a disable) and its hooks forgotten (BLOCKED).
+  A dev folder and the built-in are never blocked. install.json's reads
+  for it are kept until the next change (install, removal, scan here).
 - **The launch** (``Sweep``, a job): PluginInstaller.Sweep, a scan when it
   put a folder back. Uploads and installs are refused until it has run.
 
@@ -62,8 +72,8 @@ from typing import Any, Callable, Optional, Sequence, Tuple
 
 from loguru import logger
 
-from .PluginInstaller import (DISK_MARGIN_BYTES, InstallError,
-                              ParseBlocklist, RUNNING, BlockedBy)
+from .PluginInstaller import (DISK_MARGIN_BYTES, NOT_FOUND, RUNNING,
+                              InstallError, ParseBlocklist, BlockedBy)
 from .PluginTypes import (INSTALL_ERROR_REASONS, ZIP_MAX_BYTES, Badge,
                           BlockEntry, InstallFailure, InstallState,
                           InstallStatus, RemovalState, RemovalStatus,
@@ -186,6 +196,14 @@ class PluginInstalls:
         self._installJobs = 0
         # plugin id -> (RemovalState, InstallFailure or None)
         self._removals: dict = {}
+        # plugin id -> the last RemovalSizes answer (answered while it is
+        # being removed, and by the removal's start).
+        self._sizes: dict = {}
+        # Plugin ids whose enable is being written.
+        self._enabling: set = set()
+        # plugin id -> install.json's record (or None) for BlockedReason,
+        # dropped at each change.
+        self._records: dict = {}
         self._blocklist: Tuple[BlockEntry, ...] = ()
         self._blocked: frozenset = frozenset()
 
@@ -230,7 +248,10 @@ class PluginInstalls:
 
     def _AfterChange(self):
         """The registry read again and the hooks after it (never inside the
-        scan: PluginHooks.Refresh)."""
+        scan: PluginHooks.Refresh). Called while the plugin's starts are
+        held."""
+        with self._lock:
+            self._records.clear()
         try:
             self._registry.Scan()
         except Exception as error:
@@ -256,9 +277,34 @@ class PluginInstalls:
                                       "not an installed plugin")
         return plugin
 
+    def _ChangingLocked(self, pluginId, *, install=True, removal=True,
+                        enable=True):
+        """Why the plugin cannot be changed now (its commit, removal or
+        enable going), or None. Under the lock."""
+        current = self._install
+        if install and current is not None \
+                and current.pluginId == pluginId \
+                and current.state == InstallState.INSTALLING:
+            return "the plugin is being installed"
+        if removal and self._removals.get(
+                pluginId, (RemovalState.IDLE,))[0] == RemovalState.REMOVING:
+            return "the plugin is being removed"
+        if enable and pluginId in self._enabling:
+            return "the plugin's enable is being written"
+        return None
+
+    def _Hold(self, pluginId) -> bool:
+        """PluginJobs.Hold, when there are runs to hold (False: none)."""
+        if self._jobs is None:
+            return False
+        self._jobs.Hold(pluginId)
+        return True
+
     # ── the launch ─────────────────────────────────────────────────────
 
     def Sweep(self) -> None:
+        with self._lock:
+            self._records.clear()
         try:
             if self._installer.Sweep():
                 self._AfterChange()
@@ -504,6 +550,9 @@ class PluginInstalls:
                 raise PluginInstallsError(
                     StartRefusal.INVALID_REQUEST,
                     "the consent is not for this sheet")
+            busy = self._ChangingLocked(pending.plugin_id, install=False)
+            if busy is not None:
+                raise PluginInstallsError(StartRefusal.BUSY, busy)
         # Asked here too, so a press while a run goes answers at once (the
         # commit asks again under the hold).
         if self._jobs is not None and self._jobs.Running(pending.plugin_id):
@@ -514,6 +563,9 @@ class PluginInstalls:
                     or install.state != InstallState.CONSENT:
                 raise PluginInstallsError(StartRefusal.BUSY,
                                           "the install changed")
+            busy = self._ChangingLocked(pending.plugin_id, install=False)
+            if busy is not None:
+                raise PluginInstallsError(StartRefusal.BUSY, busy)
             install.state = InstallState.INSTALLING
             install.failure = None
             self._installJobs += 1
@@ -526,16 +578,31 @@ class PluginInstalls:
             return install.Status()
 
     def _Commit(self, install):
+        pluginId = install.pending.plugin_id
         error = None
+        held = False
         try:
-            self._installer.Commit(install.pending)
+            # Held from before the swap to after the scan: no start of the
+            # plugin reads the old manifest once the new folder is in.
+            held = self._Hold(pluginId)
+            if held and self._jobs.Running(pluginId):
+                raise InstallError(RUNNING)
+            try:
+                self._installer.Commit(install.pending)
+            finally:
+                # A failed commit may have changed the folders (a partial
+                # swap) and install.json.
+                with self._lock:
+                    self._records.pop(pluginId, None)
+            self._AfterChange()
         except Exception as caught:
             error = caught
             if not isinstance(caught, InstallError):
                 logger.opt(exception=True).debug("Plugin install: the "
                                                  "failure")
-        if error is None:
-            self._AfterChange()
+        finally:
+            if held:
+                self._jobs.Unhold(pluginId)
         self._Committed(install, error)
 
     def _Committed(self, install, error):
@@ -543,6 +610,9 @@ class PluginInstalls:
             self._installJobs = max(0, self._installJobs - 1)
             if error is None:
                 install.state = InstallState.DONE
+                # A failed removal of an earlier install is not this one's.
+                self._removals.pop(install.pluginId, None)
+                self._sizes.pop(install.pluginId, None)
             elif isinstance(error, InstallError) and error.code == RUNNING:
                 # Kept pending by Commit: press again once the run ended.
                 install.state = InstallState.CONSENT
@@ -573,14 +643,30 @@ class PluginInstalls:
 
     def SetEnabled(self, pluginId: str, enabled: bool) -> None:
         plugin = self._Installed(pluginId)
+        with self._lock:
+            busy = self._ChangingLocked(plugin.id)
+            if busy is not None:
+                raise PluginInstallsError(StartRefusal.BUSY, busy)
+            self._enabling.add(plugin.id)
+        held = False
         try:
-            self._installer.SetEnabled(plugin.id, bool(enabled))
-        except OSError:
-            raise PluginInstallsError(StartRefusal.UNAVAILABLE,
-                                      "enabled.json not written") from None
-        if not enabled and self._jobs is not None:
-            # Written first: no new start of it after this (disabled).
-            self._jobs.CancelAll(plugin.id)
+            # A disable is held: a start planned before the write (it read
+            # "enabled") is refused at its lane, one that has its lane is
+            # cancelled.
+            held = not enabled and self._Hold(plugin.id)
+            try:
+                self._installer.SetEnabled(plugin.id, bool(enabled))
+            except OSError:
+                raise PluginInstallsError(
+                    StartRefusal.UNAVAILABLE,
+                    "enabled.json not written") from None
+            if held:
+                self._jobs.CancelAll(plugin.id)
+        finally:
+            if held:
+                self._jobs.Unhold(plugin.id)
+            with self._lock:
+                self._enabling.discard(plugin.id)
         if self._hooks is not None:
             try:
                 self._hooks.Refresh()
@@ -590,70 +676,111 @@ class PluginInstalls:
 
     # ── a removal ──────────────────────────────────────────────────────
 
-    def Removal(self, pluginId: str) -> RemovalStatus:
-        plugin = self._Installed(pluginId)
+    def _Removable(self, pluginId):
+        """The plugin a removal is about: an installed plugin of the list,
+        or -- left the list after a partial removal -- an id with a failed
+        removal (asked again / answered). (its id, whether it is listed)."""
+        plugin = self._registry.Get(pluginId) \
+            if isinstance(pluginId, str) else None
+        if plugin is not None:
+            if plugin.badge not in _INSTALLED_BADGES:
+                raise PluginInstallsError(StartRefusal.INVALID_REQUEST,
+                                          "not an installed plugin")
+            return plugin.id, True
         with self._lock:
-            state, failure = self._removals.get(
-                plugin.id, (RemovalState.IDLE, None))
+            known = isinstance(pluginId, str) and pluginId in self._removals
+        if not known:
+            raise PluginInstallsError(StartRefusal.NOT_FOUND,
+                                      "no such plugin")
+        return pluginId, False
+
+    def _Sizes(self, pluginId):
+        """RemovalSizes now, kept as the last ones."""
         try:
-            data, runs, runsBytes, outBytes, work = \
-                self._installer.RemovalSizes(plugin.id)
+            sizes = tuple(self._installer.RemovalSizes(pluginId))
         except Exception as error:
             logger.warning(f"Plugins: the removal's sizes could not be read "
                            f"({type(error).__name__})")
-            data = runs = runsBytes = outBytes = 0
-            work = None
+            sizes = (0, 0, 0, 0, None)
+        with self._lock:
+            self._sizes[pluginId] = sizes
+        return sizes
+
+    @staticmethod
+    def _Status(state, failure, sizes):
+        data, runs, runsBytes, outBytes, work = sizes or (0, 0, 0, 0, None)
         return RemovalStatus(state=state, data_bytes=data, runs=runs,
                              runs_bytes=runsBytes, out_bytes=outBytes,
                              work_folder=work, failure=failure)
+
+    def Removal(self, pluginId: str) -> RemovalStatus:
+        pluginId, listed = self._Removable(pluginId)
+        with self._lock:
+            state, failure = self._removals.get(
+                pluginId, (RemovalState.IDLE, None))
+            last = self._sizes.get(pluginId)
+        if state == RemovalState.REMOVING or (not listed and last):
+            # Not walked while the job removes (the last sizes).
+            return self._Status(state, failure, last)
+        return self._Status(state, failure, self._Sizes(pluginId))
 
     def StartRemoval(self, pluginId: str, *, data: bool,
                      runs: str) -> RemovalStatus:
         if self._Stopping():
             raise PluginInstallsError(StartRefusal.UNAVAILABLE,
                                       "shutting down")
-        plugin = self._Installed(pluginId)
+        pluginId, _listed = self._Removable(pluginId)
         with self._lock:
-            state, _failure = self._removals.get(
-                plugin.id, (RemovalState.IDLE, None))
-            install = self._install
-            if state == RemovalState.REMOVING or (
-                    install is not None and install.pluginId == plugin.id
-                    and install.state == InstallState.INSTALLING):
-                raise PluginInstallsError(StartRefusal.BUSY,
-                                          "the plugin is being changed")
-            self._removals[plugin.id] = (RemovalState.REMOVING, None)
+            last = self._sizes.get(pluginId)
+        if last is None:
+            last = self._Sizes(pluginId)
+        with self._lock:
+            busy = self._ChangingLocked(pluginId)
+            if busy is not None:
+                raise PluginInstallsError(StartRefusal.BUSY, busy)
+            self._removals[pluginId] = (RemovalState.REMOVING, None)
         if not self._Submit(
-                lambda: self._Remove(plugin.id, data, runs),
+                lambda: self._Remove(pluginId, data, runs),
                 "plugin removal",
-                lambda: self._Removed(plugin.id, InstallError("stopped"))):
-            self._Removed(plugin.id, InstallError("stopped"))
-        return RemovalStatus(state=RemovalState.REMOVING)
+                lambda: self._Removed(pluginId, InstallError("stopped"))):
+            self._Removed(pluginId, InstallError("stopped"))
+        return self._Status(RemovalState.REMOVING, None, last)
 
     def _Remove(self, pluginId, data, runs):
         error = None
         held = False
         try:
-            if self._jobs is not None:
-                # Held first: neither a run nor a pending hook of it starts
-                # while the running ones are cancelled and waited for.
-                self._jobs.Hold(pluginId)
-                held = True
-                if self._jobs.CancelAll(pluginId):
-                    self._WaitStopped(pluginId)
-            self._installer.Remove(pluginId, data=data, runs=runs)
+            # Held first: neither a run nor a pending hook of it starts
+            # while the running ones are cancelled and waited for, nor
+            # until the scan has seen it gone.
+            held = self._Hold(pluginId)
+            if held:
+                self._jobs.CancelAll(pluginId)
+                # Also when none was asked: a run that ended may still be
+                # writing its folder (Running counts it).
+                self._WaitStopped(pluginId)
+            try:
+                self._installer.Remove(pluginId, data=data, runs=runs)
+            except InstallError as caught:
+                # Nothing left of it (a partial removal asked again): gone.
+                if caught.code != NOT_FOUND:
+                    raise
+            finally:
+                with self._lock:
+                    self._records.pop(pluginId, None)
+            self._AfterChange()
         except Exception as caught:
             error = caught
             if not isinstance(caught, InstallError):
                 logger.opt(exception=True).debug("Plugin removal: the "
                                                  "failure")
+            if not (isinstance(caught, InstallError)
+                    and caught.code == RUNNING):
+                # A partial removal changed the folders too.
+                self._AfterChange()
         finally:
             if held:
                 self._jobs.Unhold(pluginId)
-        if error is None or not (isinstance(error, InstallError)
-                                 and error.code == RUNNING):
-            # A partial removal changed the folders too.
-            self._AfterChange()
         self._Removed(pluginId, error)
 
     def _WaitStopped(self, pluginId):
@@ -667,6 +794,7 @@ class PluginInstalls:
         with self._lock:
             if error is None:
                 self._removals.pop(pluginId, None)
+                self._sizes.pop(pluginId, None)
             else:
                 self._removals[pluginId] = (RemovalState.FAILED,
                                             Failure(error))
@@ -684,7 +812,13 @@ class PluginInstalls:
         blocklist = self.Blocklist()
         if not blocklist:
             return None
-        record = self._installer.ReadInstallRecord(pluginId)
+        with self._lock:
+            known = pluginId in self._records
+            record = self._records.get(pluginId)
+        if not known:
+            record = self._installer.ReadInstallRecord(pluginId)
+            with self._lock:
+                self._records[pluginId] = record
         entry = BlockedBy(pluginId, version or "",
                           record.sha256 if record else None,
                           record.source.repo_id if record else None,
@@ -711,8 +845,13 @@ class PluginInstalls:
             self._blocked = blocked
         for pluginId in newly:
             logger.info(f"Plugins: {pluginId} is blocked")
-            if self._jobs is not None:
-                self._jobs.CancelAll(pluginId)
+            if self._Hold(pluginId):
+                # As a disable: a start planned before the row was in
+                # effect is refused at its lane.
+                try:
+                    self._jobs.CancelAll(pluginId)
+                finally:
+                    self._jobs.Unhold(pluginId)
             if self._hooks is not None:
                 from .PluginTypes import HookDisabledReason
                 try:

@@ -354,10 +354,10 @@ def _over_limit(max_body):
 BODY_JSON = "json"
 BODY_NONE = "none"
 
-# The view args the op log cuts to their first 6 characters (an upload's id
-# names what only the shared view's page may import or drop: the line keeps
-# enough to tell requests apart).
-_REDACTED_VIEW_ARGS = ("upload_id",)
+# The view args the op log cuts to their first 6 characters (an upload's /
+# an install's id names what only the shared view's page may import, drop or
+# consent to: the line keeps enough to tell requests apart).
+_REDACTED_VIEW_ARGS = ("upload_id", "install_id")
 _REDACTED_KEEP = 6
 
 

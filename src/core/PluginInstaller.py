@@ -139,6 +139,8 @@ STOPPED = "stopped"
 INVALID_REQUEST = "invalid_request"
 DISK_FULL = "disk_full"
 BUILTIN = "builtin"
+# The staged plugin.json is not the one the consent sheet showed.
+MANIFEST_CHANGED = "manifest_changed"
 
 _PLUGIN_ID = re.compile(PLUGIN_ID_PATTERN)
 _VERSION = re.compile(VERSION_PATTERN)
@@ -1065,11 +1067,14 @@ class PluginInstaller:
         return True
 
     def Commit(self, pending: PendingInstall) -> InstallRecord:
-        """C.3 step 6 after consent: describe in ``.new`` -> swap ->
-        install.json. RUNNING while a run of the plugin goes -- asked first
-        and again just before the swap (PluginJobs holds no per-plugin
-        reservation) -- keeps the install pending: press again once the run
-        ended. Every other refusal drops it. Raises InstallError."""
+        """C.3 step 6 after consent: the staged plugin.json checked again
+        against the consented sheet (MANIFEST_CHANGED) -> describe in
+        ``.new`` -> swap -> install.json. RUNNING while a run of the plugin
+        goes -- asked first, and by the hold (PluginJobs.Hold) taken before
+        the swap, which refuses the plugin's starts until the swap's end --
+        keeps the install pending: press again once the run ended. Every
+        other refusal drops it (.new removed). The caller holds the starts
+        on to its registry scan (PluginInstalls). Raises InstallError."""
         pluginId = pending.plugin_id
         # Asked outside the lock: another part's lock is never taken
         # inside this one.
@@ -1108,6 +1113,18 @@ class PluginInstaller:
         if BlockedBy(pluginId, pending.version, pending.sha256,
                      pending.source.repo_id, self._blocklist()) is not None:
             raise InstallError(BLOCKED)
+        # What is swapped in is what was consented to: the staged
+        # plugin.json read and checked again, its digest recomputed (D6).
+        try:
+            staged = self._CheckManifest(pending.new_dir, pluginId,
+                                         pending.source).manifest
+        except InstallError:
+            staged = None
+        if staged is None or staged != manifest or ConsentDigest(
+                staged, pending.source) != pending.consent_digest:
+            logger.warning(f"Plugin install: {pluginId}: the staged "
+                           f"plugin.json changed since the consent")
+            raise InstallError(MANIFEST_CHANGED)
         run = self._runner.Describe(pending.new_dir, manifest.entry,
                                     dev=False)
         result = self._registry.JudgeDescribe(run, manifest)
@@ -1265,13 +1282,19 @@ class PluginInstaller:
             self._ForgetEnabled(pluginId)
             try:
                 for path in leftovers:
-                    if os.path.isdir(path) and not os.path.islink(path):
+                    if _IsLink(path):
+                        _RemoveLink(path)
+                    elif os.path.isdir(path):
                         ZipSafety.RemoveTree(path)
                     elif os.path.lexists(path):
                         os.remove(path)
-                if os.path.lexists(folder):
+                if _IsLink(folder):
+                    _RemoveLink(folder)
+                elif os.path.lexists(folder):
                     ZipSafety.RemoveTree(folder)
-                if os.path.isdir(userDir):
+                if _IsLink(userDir):
+                    _RemoveLink(userDir)
+                elif os.path.isdir(userDir):
                     if data:
                         ZipSafety.RemoveTree(userDir)
                     else:
@@ -1298,6 +1321,11 @@ class PluginInstaller:
         if runs == RUNS_KEEP or not work:
             return
         folder = os.path.join(work, PLUGINS_DIR, pluginId)
+        if _IsLink(folder):
+            # A link or a junction in the plugin's place: the link goes,
+            # never what it points at (not this plugin's).
+            _RemoveLink(folder)
+            return
         if not os.path.isdir(folder):
             return
         if runs == RUNS_DELETE:
@@ -1305,7 +1333,9 @@ class PluginInstaller:
             return
         for name in os.listdir(folder):
             path = os.path.join(folder, name)
-            if os.path.isdir(path) and not os.path.islink(path):
+            if _IsLink(path):
+                _RemoveLink(path)
+            elif os.path.isdir(path):
                 _RemoveChildren(path, keep=(OUT_DIR,))
             else:
                 os.remove(path)
@@ -1421,14 +1451,29 @@ def _TreeBytes(folder: str) -> int:
     return total
 
 
+def _IsLink(path: str) -> bool:
+    """A symbolic link or a junction (os.path.islink is False for a
+    junction): removed as a link, never descended into."""
+    return os.path.islink(path) or os.path.isjunction(path)
+
+
+def _RemoveLink(path: str) -> None:
+    """Remove a link or a junction itself (os.unlink removes a directory
+    link / junction on Windows), not its target. Raises OSError."""
+    os.unlink(path)
+
+
 def _RemoveChildren(folder: str, *, keep: Sequence[str]) -> None:
-    """Remove what is in ``folder`` but the names in ``keep``. Raises
+    """Remove what is in ``folder`` but the names in ``keep``; a link or a
+    junction is removed as itself (its target is not touched). Raises
     OSError."""
     for name in os.listdir(folder):
         if name in keep:
             continue
         path = os.path.join(folder, name)
-        if os.path.isdir(path) and not os.path.islink(path):
+        if _IsLink(path):
+            _RemoveLink(path)
+        elif os.path.isdir(path):
             ZipSafety.RemoveTree(path)
         else:
             os.remove(path)

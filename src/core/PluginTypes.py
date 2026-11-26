@@ -523,6 +523,7 @@ INSTALL_ERROR_REASONS: Mapping[str, StartRefusal] = MappingProxyType({
     "in_progress": StartRefusal.BUSY,
     "running": StartRefusal.BUSY,
     "describe_failed": StartRefusal.INCOMPATIBLE,
+    "manifest_changed": StartRefusal.INCOMPATIBLE,
     "extract_failed": StartRefusal.UNAVAILABLE,
     "swap_failed": StartRefusal.UNAVAILABLE,
     "not_pending": StartRefusal.NOT_FOUND,
@@ -1533,17 +1534,22 @@ class PluginInstalls(Protocol):
         """An installed plugin's enable; a disable cancels its runs."""
 
     def Removal(self, pluginId: str) -> RemovalStatus:
-        """What a removal would remove, and the removal's state."""
+        """What a removal would remove, and the removal's state -- also
+        for a plugin that left the list after a failed (partial) removal
+        (NOT_FOUND only when gone and no removal known). Not walked again
+        while it is being removed (the last sizes)."""
 
     def StartRemoval(self, pluginId: str, *, data: bool,
                      runs: str) -> RemovalStatus:
         """Remove (a job): the plugin's starts held, its runs cancelled and
-        waited for, PluginInstaller.Remove, then registry.Scan and
-        hooks.Refresh."""
+        waited for, PluginInstaller.Remove, registry.Scan and hooks.Refresh,
+        then the hold given back. Answers the last-known sizes. BUSY while
+        the plugin's commit, removal or enable goes."""
 
     def SetBlocklist(self, entries: Sequence[BlockEntry]) -> None:
         """The blocked rows in effect: an installed plugin newly matching is
-        cancelled and its hooks forgotten (BLOCKED)."""
+        cancelled under a hold (a start planned before is refused) and its
+        hooks forgotten (BLOCKED)."""
 
     def Blocklist(self) -> Tuple[BlockEntry, ...]:
         """The blocked rows in effect."""

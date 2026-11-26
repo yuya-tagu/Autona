@@ -132,6 +132,7 @@ class FakeInstaller:
         self.calls.append(("SetEnabled", pluginId, enabled))
 
     def RemovalSizes(self, pluginId):
+        self.calls.append(("RemovalSizes", pluginId))
         return self.sizes
 
     def Remove(self, pluginId, *, data, runs):
@@ -140,6 +141,7 @@ class FakeInstaller:
             raise self.removeError
 
     def ReadInstallRecord(self, pluginId):
+        self.calls.append(("ReadInstallRecord", pluginId))
         return self.record
 
     def BlockedInstalled(self, versions, blocklist):
@@ -180,6 +182,9 @@ class FakeJobs:
         self.calls = []
         self.running = set()
         self.endOnCancel = True
+        # A run that ended but still writes its folder: Running, yet
+        # nothing for CancelAll to ask (PluginJobs._finishing).
+        self.finishing = False
 
     def Running(self, pluginId):
         return pluginId in self.running
@@ -193,8 +198,8 @@ class FakeJobs:
 
     def CancelAll(self, pluginId):
         self.calls.append(("CancelAll", pluginId))
-        count = 1 if pluginId in self.running else 0
-        if self.endOnCancel:
+        count = 1 if pluginId in self.running and not self.finishing             else 0
+        if self.endOnCancel and not self.finishing:
             self.running.discard(pluginId)
         return count
 
@@ -474,13 +479,24 @@ def test_a_job_the_shutdown_cancelled_ends_the_install(env):
 
 def test_a_disable_is_saved_then_its_runs_cancelled(env):
     env.jobs.running.add(PLUGIN)
+    write = env.installer.SetEnabled
+
+    def logged(pluginId, enabled):
+        env.jobs.calls.append(("write", enabled))
+        write(pluginId, enabled)
+
+    env.installer.SetEnabled = logged
     env.installs.SetEnabled(PLUGIN, False)
     assert env.installer.calls[-1] == ("SetEnabled", PLUGIN, False)
-    assert env.jobs.calls == [("CancelAll", PLUGIN)]
+    # Held around the write and the cancel: a start planned before the
+    # write is refused at its lane (PluginJobs' hold epoch).
+    assert env.jobs.calls == [("Hold", PLUGIN), ("write", False),
+                              ("CancelAll", PLUGIN), ("Unhold", PLUGIN)]
     assert env.hooks.refreshes == 1
+    env.jobs.calls.clear()
     env.installs.SetEnabled(PLUGIN, True)
     assert env.installer.calls[-1] == ("SetEnabled", PLUGIN, True)
-    assert env.jobs.calls == [("CancelAll", PLUGIN)]
+    assert env.jobs.calls == [("write", True)]
 
 
 def test_only_an_installed_plugin_is_enabled(env):
@@ -494,7 +510,8 @@ def test_only_an_installed_plugin_is_enabled(env):
     error = _refused(lambda: env.installs.SetEnabled(PLUGIN, False),
                      StartRefusal.UNAVAILABLE)
     assert "C:/" not in error.detail
-    assert env.jobs.calls == []
+    # Not written: nothing cancelled, the hold given back.
+    assert env.jobs.calls == [("Hold", PLUGIN), ("Unhold", PLUGIN)]
 
 
 # ── a removal ───────────────────────────────────────────────────────────
@@ -523,9 +540,16 @@ def test_a_removal_holds_cancels_waits_removes_and_scans(env):
         env.jobs.running.discard(PLUGIN)
 
     env.installs._sleep = endSoon
+    scan = env.registry.Scan
+    env.registry.Scan = lambda: (env.jobs.calls.append(("Scan",)), scan())
+    remove = env.installer.Remove
+    env.installer.Remove = lambda pluginId, **kw: (
+        env.jobs.calls.append(("Remove",)), remove(pluginId, **kw))
     env.executor.RunAll()
+    # The scan is inside the hold: no start of it between its folder going
+    # and the list knowing.
     assert env.jobs.calls == [("Hold", PLUGIN), ("CancelAll", PLUGIN),
-                              ("Unhold", PLUGIN)]
+                              ("Remove",), ("Scan",), ("Unhold", PLUGIN)]
     assert env.installer.calls[-1] == ("Remove", PLUGIN, True, "keep_out")
     assert env.registry.scans == 1 and env.hooks.refreshes == 1
     assert env.installs.Removal(PLUGIN).state is RemovalState.IDLE
@@ -570,6 +594,201 @@ def test_no_removal_while_its_install_commits(env):
              StartRefusal.BUSY)
 
 
+# ── the review's fixes: holds, one change at a time, the caches ────────
+
+def test_a_commit_holds_the_plugin_through_the_scan(env):
+    # The swap and the scan inside one hold: no start of the plugin reads
+    # the old manifest once the new folder is in (PluginJobs' hold epoch
+    # refuses a start planned before).
+    installId = _consent(env)
+    commit = env.installer.Commit
+    env.installer.Commit = lambda pending: (
+        env.jobs.calls.append(("Commit",)), commit(pending))
+    scan = env.registry.Scan
+    env.registry.Scan = lambda: (env.jobs.calls.append(("Scan",)), scan())
+    refresh = env.hooks.Refresh
+    env.hooks.Refresh = lambda: (env.jobs.calls.append(("Refresh",)),
+                                 refresh())
+    env.installs.Consent(installId, "d" * 64)
+    env.executor.RunAll()
+    assert env.jobs.calls == [("Hold", PLUGIN), ("Commit",), ("Scan",),
+                              ("Refresh",), ("Unhold", PLUGIN)]
+    assert env.installs.Status(installId).state is InstallState.DONE
+
+
+def test_a_run_started_before_the_commits_hold_keeps_it_pending(env):
+    installId = _consent(env)
+    env.installs.Consent(installId, "d" * 64)
+    env.jobs.running.add(PLUGIN)  # got its lane before the job held
+    env.executor.RunAll()
+    status = env.installs.Status(installId)
+    assert status.state is InstallState.CONSENT
+    assert status.failure.code == "running"
+    assert ("Commit", PLUGIN) not in env.installer.calls
+    assert env.jobs.calls[-1] == ("Unhold", PLUGIN)
+    assert env.registry.scans == 0
+
+
+def test_a_staged_manifest_changed_ends_the_install_incompatible(env):
+    installId = _consent(env)
+    env.installer.commitError = InstallError("manifest_changed")
+    env.installs.Consent(installId, "d" * 64)
+    env.executor.RunAll()
+    status = env.installs.Status(installId)
+    assert status.state is InstallState.FAILED
+    assert status.failure.code == "manifest_changed"
+    assert status.failure.reason is StartRefusal.INCOMPATIBLE
+
+
+def test_a_removal_waits_for_a_run_writing_its_folder(env):
+    # CancelAll asks nothing of a run that ended but still writes job.json
+    # (0), yet it is Running: the removal waits all the same.
+    env.jobs.running.add(PLUGIN)
+    env.jobs.finishing = True
+    removed = []
+    remove = env.installer.Remove
+    env.installer.Remove = lambda pluginId, **kw: (
+        removed.append(env.jobs.Running(pluginId)), remove(pluginId, **kw))
+
+    def written(seconds):
+        env.slept.append(seconds)
+        env.jobs.running.discard(PLUGIN)
+
+    env.installs._sleep = written
+    env.installs.StartRemoval(PLUGIN, data=True, runs="delete")
+    env.executor.RunAll()
+    assert env.slept and removed == [False]
+    assert env.installs.Removal(PLUGIN).state is RemovalState.IDLE
+
+
+def test_no_consent_while_the_plugin_is_being_removed(env):
+    installId = _consent(env)
+    env.installs.StartRemoval(PLUGIN, data=True, runs="keep")
+    _refused(lambda: env.installs.Consent(installId, "d" * 64),
+             StartRefusal.BUSY)
+    assert env.installs.Status(installId).state is InstallState.CONSENT
+    env.executor.RunAll()
+    env.installs.Consent(installId, "d" * 64)
+    env.executor.RunAll()
+    assert env.installs.Status(installId).state is InstallState.DONE
+
+
+def test_no_enable_while_the_plugin_is_removed_or_committed(env):
+    env.installs.StartRemoval(PLUGIN, data=True, runs="keep")
+    _refused(lambda: env.installs.SetEnabled(PLUGIN, False),
+             StartRefusal.BUSY)
+    env.executor.RunAll()
+    installId = _consent(env)
+    env.installs.Consent(installId, "d" * 64)
+    _refused(lambda: env.installs.SetEnabled(PLUGIN, True),
+             StartRefusal.BUSY)
+    env.executor.RunAll()
+    env.installs.SetEnabled(PLUGIN, True)
+    assert env.installer.calls[-1] == ("SetEnabled", PLUGIN, True)
+
+
+def test_no_removal_or_commit_while_the_enable_is_written(env):
+    installId = _consent(env)
+    seen = []
+    write = env.installer.SetEnabled
+
+    def during(pluginId, enabled):
+        for call in (lambda: env.installs.StartRemoval(PLUGIN, data=True,
+                                                       runs="keep"),
+                     lambda: env.installs.Consent(installId, "d" * 64)):
+            seen.append(_refused(call, StartRefusal.BUSY).reason)
+        write(pluginId, enabled)
+
+    env.installer.SetEnabled = during
+    env.installs.SetEnabled(PLUGIN, False)
+    assert seen == [StartRefusal.BUSY, StartRefusal.BUSY]
+    # Given back after the write.
+    env.installs.Consent(installId, "d" * 64)
+
+
+def test_a_removal_that_failed_after_the_plugin_left_is_still_answered(
+        env):
+    # A partial removal took the plugin's folder (it left the list) but
+    # failed after: answered failed with the last sizes, asked again.
+    remove = env.installer.Remove
+
+    def partial(pluginId, **kw):
+        remove(pluginId, **kw)
+        del env.registry.plugins[PLUGIN]
+        raise InstallError("remove_failed")
+
+    env.installer.Remove = partial
+    started = env.installs.StartRemoval(PLUGIN, data=True, runs="delete")
+    # The answer carries the last-known sizes.
+    assert (started.data_bytes, started.runs, started.work_folder) == \
+        (10, 2, "work")
+    env.executor.RunAll()
+    assert env.registry.Get(PLUGIN) is None
+    status = env.installs.Removal(PLUGIN)
+    assert status.state is RemovalState.FAILED
+    assert status.failure.code == "remove_failed"
+    assert status.data_bytes == 10
+
+    # Asked again: nothing left of it (NOT_FOUND) is a removal that ended.
+    def gone(pluginId, **kw):
+        raise InstallError("not_found")
+
+    env.installer.Remove = gone
+    env.installs.StartRemoval(PLUGIN, data=True, runs="delete")
+    env.executor.RunAll()
+    _refused(lambda: env.installs.Removal(PLUGIN), StartRefusal.NOT_FOUND)
+    _refused(lambda: env.installs.StartRemoval(PLUGIN, data=True,
+                                               runs="delete"),
+             StartRefusal.NOT_FOUND)
+
+
+def test_a_new_install_forgets_a_failed_removal(env):
+    env.installer.removeError = InstallError("remove_failed")
+    env.installs.StartRemoval(PLUGIN, data=True, runs="delete")
+    env.executor.RunAll()
+    assert env.installs.Removal(PLUGIN).state is RemovalState.FAILED
+    installId = _consent(env)
+    env.installs.Consent(installId, "d" * 64)
+    env.executor.RunAll()
+    status = env.installs.Removal(PLUGIN)
+    assert status.state is RemovalState.IDLE and status.failure is None
+
+
+def test_the_sizes_are_not_walked_while_it_is_removed(env):
+    env.installs.StartRemoval(PLUGIN, data=True, runs="keep")
+    walks = env.installer.calls.count(("RemovalSizes", PLUGIN))
+    env.installer.sizes = (99, 9, 99, 99, "other")
+    for _ in range(3):
+        status = env.installs.Removal(PLUGIN)
+        assert status.state is RemovalState.REMOVING
+        assert status.data_bytes == 10
+    assert env.installer.calls.count(("RemovalSizes", PLUGIN)) == walks
+    env.executor.RunAll()
+    assert env.installs.Removal(PLUGIN).data_bytes == 99
+
+
+def test_the_blocked_check_reads_install_json_once_per_change(env):
+    env.installs.SetBlocklist([dataclasses.replace(ROW, id="other.one")])
+
+    def reads():
+        return env.installer.calls.count(("ReadInstallRecord", PLUGIN))
+
+    for _ in range(3):
+        assert env.installs.BlockedReason(PLUGIN, "1.0.0") is None
+    assert reads() == 1
+    env.installs.Sweep()
+    env.installs.BlockedReason(PLUGIN, "1.0.0")
+    assert reads() == 2
+    env.installs.Consent(_consent(env), "d" * 64)
+    env.executor.RunAll()
+    env.installs.BlockedReason(PLUGIN, "1.0.0")
+    assert reads() == 3
+    env.installs.StartRemoval(PLUGIN, data=True, runs="keep")
+    env.executor.RunAll()
+    env.installs.BlockedReason(PLUGIN, "1.0.0")
+    assert reads() == 4
+
+
 # ── the blocklist ───────────────────────────────────────────────────────
 
 ROW = BlockEntry(reason={"ja": "危険", "en": "Unsafe"}, since="2026-11-01",
@@ -581,7 +800,9 @@ def test_a_newly_blocked_plugin_is_stopped_and_its_hooks_forgotten(env):
     env.installer.blocked = {PLUGIN: ROW}
     env.installs.SetBlocklist([ROW])
     assert env.installs.Blocklist() == (ROW,)
-    assert env.jobs.calls == [("CancelAll", PLUGIN)]
+    # As a disable: held around the cancel (the row is in effect first).
+    assert env.jobs.calls == [("Hold", PLUGIN), ("CancelAll", PLUGIN),
+                              ("Unhold", PLUGIN)]
     assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.BLOCKED)]
     assert env.hooks.refreshes == 1
     assert env.installs.BlockedReason(PLUGIN, "1.0.0") == ROW.reason
@@ -685,38 +906,107 @@ def _until(condition, within=120.0):
     return True
 
 
+class RealParts:
+    """The real installer, registry, runs and runner (the fake worker)."""
+
+    def __init__(self, tmp_path):
+        self.app, self.user, self.work = tmp_path / "Autona", \
+            tmp_path / "user_data", tmp_path / "work"
+        self.app.mkdir()
+        app, user, work = self.app, self.user, self.work
+        self.runner = runner = WorkerRunner(poll=0.02, cancelGrace=5.0)
+        parts = {}
+        self.registry = registry = PluginRegistry(
+            str(app), str(user), "2.6.0", describe=runner.Describe,
+            isRunning=lambda pluginId: parts["jobs"].Running(pluginId),
+            isEnabled=lambda pluginId: parts["installer"].IsEnabled(
+                pluginId),
+            installSource=lambda pluginId: getattr(
+                parts["installer"].ReadInstallRecord(pluginId), "source",
+                None))
+        self.jobs = jobs = PluginJobs(
+            runner=runner, registry=registry, inputs=NoInputs(),
+            settings=NoSettings(), secrets=NoSecrets(),
+            workDir=lambda: str(work), userDataDir=str(user),
+            hostVersion="2.6.0", locale=lambda: "ja", apiUrl=lambda: None,
+            onRunEnded=lambda record: None, onLaneFreed=lambda lane: None,
+            environ=lambda: dict(os.environ))
+        self.installer = installer = PluginInstaller(
+            str(app), str(user), registry=registry, runner=runner,
+            hostVersion="2.6.0", secrets=NoSecrets(), jobs=jobs,
+            workDir=lambda: str(work))
+        parts.update(jobs=jobs, installer=installer)
+        self.hooks = FakeHooks()
+        self.installs = PluginInstalls(installer, registry, jobs=jobs,
+                                       hooks=self.hooks,
+                                       executor=SyncExecutor())
+        registry.Scan()
+        self.installs.Sweep()
+
+    def Install(self):
+        installs = self.installs
+        data = _plugin_zip_bytes()
+        uploadId, _expires = installs.ReceiveUpload(io.BytesIO(data),
+                                                    len(data))
+        status = installs.Status(installs.StartInstall(uploadId).install_id)
+        assert status.state is InstallState.CONSENT, status.failure
+        status = installs.Consent(status.install_id,
+                                  status.pending.consent_digest)
+        status = installs.Status(status.install_id)
+        assert status.state is InstallState.DONE, status.failure
+        return status
+
+    def StartSlow(self):
+        record = self.jobs.Start(PLUGIN, "run", MANUAL, {"mode": "slow"},
+                                 {}, {})
+        assert isinstance(record, RunRecord), record
+        assert self.jobs.Running(PLUGIN)
+        return record
+
+
+@windows
+def test_a_disable_or_a_removal_stops_a_running_run(tmp_path):
+    real = RealParts(tmp_path)
+    jobs, installs, registry = real.jobs, real.installs, real.registry
+    try:
+        real.Install()
+
+        # Disabled while it runs: the run is cancelled and ends.
+        record = real.StartSlow()
+        installs.SetEnabled(PLUGIN, False)
+        assert registry.Get(PLUGIN).state is PluginState.DISABLED
+        assert jobs.Get(PLUGIN, record.run_id).cancel_requested
+        assert _until(lambda: not jobs.Running(PLUGIN))
+        assert jobs.Get(PLUGIN, record.run_id).state is JobState.CANCELLED
+        assert not isinstance(
+            jobs.Start(PLUGIN, "run", MANUAL, {"mode": "slow"}, {}, {}),
+            RunRecord)
+
+        # Removed while it runs: cancel -> wait -> removed (the job runs
+        # inline here: SyncExecutor).
+        installs.SetEnabled(PLUGIN, True)
+        record = real.StartSlow()
+        started = installs.StartRemoval(PLUGIN, data=True, runs="delete")
+        assert started.runs >= 1
+        assert not jobs.Running(PLUGIN)
+        assert registry.Get(PLUGIN) is None
+        assert not (real.app / "plugins" / PLUGIN).exists()
+        assert not (real.user / "plugins" / PLUGIN).exists()
+        assert not (real.work / "plugins" / PLUGIN).exists()
+        _refused(lambda: installs.Removal(PLUGIN), StartRefusal.NOT_FOUND)
+        assert jobs.Hold(PLUGIN) is True  # the hold was given back
+        jobs.Unhold(PLUGIN)
+    finally:
+        real.runner.Shutdown(5.0)
+
+
 @windows
 def test_install_consent_run_disable_enable_remove(tmp_path):
-    app, user, work = tmp_path / "Autona", tmp_path / "user_data", \
-        tmp_path / "work"
-    app.mkdir()
-    runner = WorkerRunner(poll=0.02, cancelGrace=5.0)
-    parts = {}
-    registry = PluginRegistry(
-        str(app), str(user), "2.6.0", describe=runner.Describe,
-        isRunning=lambda pluginId: parts["jobs"].Running(pluginId),
-        isEnabled=lambda pluginId: parts["installer"].IsEnabled(pluginId),
-        installSource=lambda pluginId: getattr(
-            parts["installer"].ReadInstallRecord(pluginId), "source", None))
-    jobs = PluginJobs(
-        runner=runner, registry=registry, inputs=NoInputs(),
-        settings=NoSettings(), secrets=NoSecrets(),
-        workDir=lambda: str(work), userDataDir=str(user),
-        hostVersion="2.6.0", locale=lambda: "ja", apiUrl=lambda: None,
-        onRunEnded=lambda record: None, onLaneFreed=lambda lane: None,
-        environ=lambda: dict(os.environ))
-    installer = PluginInstaller(
-        str(app), str(user), registry=registry, runner=runner,
-        hostVersion="2.6.0", secrets=NoSecrets(), jobs=jobs,
-        workDir=lambda: str(work))
-    parts.update(jobs=jobs, installer=installer)
-    hooks = FakeHooks()
-    installs = PluginInstalls(installer, registry, jobs=jobs, hooks=hooks,
-                              executor=SyncExecutor())
+    real = RealParts(tmp_path)
+    app, user, work = real.app, real.user, real.work
+    runner, registry, jobs = real.runner, real.registry, real.jobs
+    installs, hooks = real.installs, real.hooks
     try:
-        registry.Scan()
-        installs.Sweep()
-
         # The upload, the sheet, the consent.
         data = _plugin_zip_bytes()
         uploadId, _expires = installs.ReceiveUpload(io.BytesIO(data),

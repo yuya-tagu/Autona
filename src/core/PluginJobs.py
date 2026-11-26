@@ -9,10 +9,12 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
   PluginJobs owns both lanes: another owner (the built-in vodsplit, run by
   ArchiveJobService, on the heavy one) takes a lane with ``Claim(lane,
   owner)`` and gives it back with ``Release(lane, owner)``;
-- the per-plugin hold of a swap or a removal (``Hold`` / ``Unhold``, ADR-009
-  C.3): while held, a start of the plugin is refused UNAVAILABLE; Hold
-  answers whether a run of it holds a lane, under the lock a start reserves
-  its lane with, so the installer's swap never meets a run it did not see.
+- the per-plugin hold of a swap, a removal, a disable or a block (``Hold`` /
+  ``Unhold``, ADR-009 C.3): while held, a start of the plugin is refused
+  UNAVAILABLE, and so is one whose plan was read before a hold (its
+  manifest or state may be stale); Hold answers whether a run of it is
+  going, under the lock a start reserves its lane with, so the installer's
+  swap never meets a run it did not see.
   ``CancelAll`` asks every run of a plugin to stop (a disable, a removal);
 - a run's job folder ``<work>/plugins/<id>/<run_id>/`` with request.json
   (UTF-8, no BOM), job.json, worker.log (the runner appends to it),
@@ -833,9 +835,11 @@ class PluginJobs:
         self._launched = threading.Condition(self._lock)
         self._filesLock = threading.Lock()
         self._lanes: dict = {Lane.HEAVY: None, Lane.LIGHT: None}
-        # Plugin id -> how many holds keep its starts refused (a swap or a
-        # removal: Hold / Unhold).
+        # Plugin id -> how many holds keep its starts refused (a swap, a
+        # removal, a disable, a block: Hold / Unhold), and how many holds it
+        # has had (a start planned before one is refused at its lane).
         self._held: dict = {}
+        self._holdEpochs: dict = {}
         # Runs that ended and whose job.json is not written yet.
         self._finishing: dict = {}
         self._closing = False
@@ -993,6 +997,7 @@ class PluginJobs:
         before (False here) or sees the hold."""
         with self._lock:
             self._held[pluginId] = self._held.get(pluginId, 0) + 1
+            self._holdEpochs[pluginId] = self._holdEpochs.get(pluginId, 0) + 1
             return not self._RunningLocked(pluginId)
 
     def Unhold(self, pluginId: str) -> None:
@@ -1212,6 +1217,11 @@ class PluginJobs:
         with self._lock:
             if self._closing:
                 return _Unavailable("shutting down")
+            # What the plan reads (the registry's manifest and state: the
+            # enable, the blocklist) is read outside the lock; a hold taken
+            # since (a swap, a removal, a disable, a block) refuses the
+            # start at its lane, so no run starts from a stale plan.
+            epoch = self._holdEpochs.get(pluginId, 0)
         try:
             plan = self._Plan(pluginId, jobId, trigger, params, settings,
                               picks)
@@ -1226,8 +1236,10 @@ class PluginJobs:
         with self._lock:
             if self._closing:
                 return _Unavailable("shutting down")
-            if self._held.get(pluginId):
-                # A swap or a removal of it is going (Hold).
+            if self._held.get(pluginId) \
+                    or self._holdEpochs.get(pluginId, 0) != epoch:
+                # A swap, a removal, a disable or a block of it is going,
+                # or went since the plan was read (Hold).
                 return _Unavailable("the plugin is being installed or "
                                     "removed")
             busy = self._BusyLocked(plan.lane)

@@ -707,6 +707,18 @@ def test_a_dev_plugin_is_never_blocked(tmp_path):
     assert registry.Get("me.tool").state == T.PluginState.READY
 
 
+def test_a_dev_plugin_is_never_disabled(tmp_path):
+    # enabled.json is the installed copy's: a dev folder of the same id is
+    # not disabled by it (the registry asks nothing for a dev plugin).
+    folder = _dev(tmp_path, "src", "me.tool")
+    asked = []
+    registry = _registry(tmp_path, environ=lambda: {DEV_ENV: str(folder)},
+                         isEnabled=lambda pid: asked.append(pid) or False)
+    registry.Scan()
+    assert registry.Get("me.tool").state == T.PluginState.READY
+    assert "me.tool" not in asked
+
+
 # ── the list's state ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("conditions, state", [

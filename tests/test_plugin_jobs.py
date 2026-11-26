@@ -672,6 +672,34 @@ def test_a_run_writing_its_folder_still_counts_as_running(env):
     assert not env.jobs.Running(PLUGIN) and env.jobs.Hold(PLUGIN)
 
 
+def test_a_start_planned_before_a_hold_is_refused_at_its_lane(env):
+    # The plan reads the registry (enabled, blocked, the manifest) outside
+    # the lock: a disable / block / swap / removal held and given back in
+    # between makes that plan stale -- refused, nothing launched.
+    plan = env.jobs._Plan
+
+    def stale(*args):
+        planned = plan(*args)
+        env.jobs.Hold(PLUGIN)
+        env.jobs.Unhold(PLUGIN)
+        return planned
+
+    env.jobs._Plan = stale
+    refused = env.StartPost()
+    assert refused.reason is StartRefusal.UNAVAILABLE
+    assert env.runner.started == []
+    assert not env.jobs.Running(PLUGIN)
+    # Another plugin's hold does not make it stale.
+    env.jobs._Plan = lambda *args: (env.jobs.Hold("other.plugin"),
+                                    env.jobs.Unhold("other.plugin"),
+                                    plan(*args))[2]
+    assert env.StartPost().run_id
+    env.End(0, _Done())
+    # A plan read after the hold was given back starts.
+    env.jobs._Plan = plan
+    assert env.StartPost().run_id
+
+
 def _Logged(action):
     lines = []
     sink = logger.add(lambda message: lines.append(str(message)),

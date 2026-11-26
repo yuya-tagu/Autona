@@ -1079,9 +1079,18 @@ def plugin_disable(deps, plugin_id):
     return _Enable(deps, plugin_id, False)
 
 
+def _RemovalId(pluginId):
+    """A removal's plugin id: its form only -- PluginInstalls answers one
+    that left the list after a failed (partial) removal, and refuses
+    NOT_FOUND only when it is gone and no removal is known."""
+    if not isinstance(pluginId, str) or not _PLUGIN_ID.fullmatch(pluginId):
+        raise _NotFound("no such plugin")
+    return pluginId
+
+
 def get_plugin_removal(deps, plugin_id):
-    plugin = _Plugin(deps, plugin_id)
-    return _Ok(_RemovalJson(_Installs(deps, "Removal", plugin.id)))
+    return _Ok(_RemovalJson(_Installs(deps, "Removal",
+                                      _RemovalId(plugin_id))))
 
 
 def plugin_remove(deps, plugin_id):
@@ -1090,11 +1099,12 @@ def plugin_remove(deps, plugin_id):
         raise _Invalid("data is a boolean")
     if body["runs"] not in REMOVE_RUNS:
         raise _Invalid("runs is " + " | ".join(REMOVE_RUNS))
-    plugin = _Plugin(deps, plugin_id)
+    pluginId = _RemovalId(plugin_id)
     # A job (PluginInstalls): the plugin's starts held, its runs cancelled
     # and waited for, then PluginInstaller.Remove (its Forget(REMOVED)),
-    # registry.Scan and hooks.Refresh. The page polls GET removal.
-    status = _Installs(deps, "StartRemoval", plugin.id, data=body["data"],
+    # registry.Scan and hooks.Refresh. The page polls GET removal. The
+    # answer carries the last-known sizes.
+    status = _Installs(deps, "StartRemoval", pluginId, data=body["data"],
                        runs=body["runs"])
     return _Ok(_RemovalJson(status), status=202)
 

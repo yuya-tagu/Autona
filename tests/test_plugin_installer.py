@@ -21,7 +21,7 @@ from loguru import logger
 from src.core import PluginInstaller as installer_module
 from src.core.PluginInstaller import (
     BAD_ZIP, BLOCKED, BUILTIN, DESCRIBE_FAILED, DISK_FULL, EXTRACT_FAILED,
-    IN_PROGRESS, MANIFEST_INVALID, NETWORK_FAILED, NOT_FOUND, NOT_PENDING,
+    IN_PROGRESS, MANIFEST_CHANGED, MANIFEST_INVALID, NETWORK_FAILED, NOT_FOUND, NOT_PENDING,
     RUNNING, SECRETS_FAILED, SWAP_FAILED, BlockedBy, CheckDescriptor,
     ConsentDigest, DecideSource, InstallError, ParseBlocklist,
     PluginInstaller, VersionMatches)
@@ -1587,3 +1587,106 @@ def test_the_module_reads_its_input_only_from_arguments():
     for name in ("urllib", "requests", "http.client", "subprocess",
                  "socket"):
         assert f"import {name}" not in source
+
+
+# ── the review's fixes: the consented manifest, links in a removal ──────
+
+def test_a_staged_manifest_changed_after_the_consent_refuses_the_commit(env):
+    # The page consented to the sheet it showed: a plugin.json changed in
+    # .new since (more permissions) is not what was consented to.
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    path = os.path.join(pending.new_dir, "plugin.json")
+    with open(path, encoding="utf-8") as file:
+        raw = json.load(file)
+    raw["permissions"]["network"] = ["evil.example.com"]
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(raw, file)
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == MANIFEST_CHANGED
+    assert not os.path.exists(pending.new_dir)
+    assert not (env.plugins / PLUGIN).exists()
+    assert env.runner.described == []
+    assert env.installer.ReadInstallRecord(PLUGIN) is None
+
+
+def test_an_unreadable_staged_manifest_at_the_commit_is_changed_too(env):
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    os.remove(os.path.join(pending.new_dir, "plugin.json"))
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == MANIFEST_CHANGED
+    assert not os.path.exists(pending.new_dir)
+
+
+def _folder_link(target, link):
+    """Folder ``link`` leading to ``target`` (a symlink, else a junction:
+    no privilege needed); skips where neither can be made."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        except (ImportError, AttributeError, OSError):
+            pytest.skip("no symlink or junction here")
+
+
+def _outside(env):
+    outside = env.tmp / "outside"
+    (outside / "out").mkdir(parents=True, exist_ok=True)
+    (outside / "keep.txt").write_text("mine")
+    (outside / "out" / "o.txt").write_text("mine too")
+    return outside
+
+
+def _untouched(outside):
+    assert (outside / "keep.txt").read_text() == "mine"
+    assert (outside / "out" / "o.txt").read_text() == "mine too"
+
+
+@pytest.mark.parametrize("runs", ["keep_out", "delete"])
+def test_a_removal_does_not_follow_a_linked_work_folder(env, runs):
+    _install_manual(env)
+    outside = _outside(env)
+    (env.work / "plugins").mkdir(parents=True, exist_ok=True)
+    work = env.work / "plugins" / PLUGIN
+    if work.exists():
+        os.rmdir(work)
+    _folder_link(outside, work)
+    env.installer.Remove(PLUGIN, data=True, runs=runs)
+    assert not os.path.lexists(work)
+    _untouched(outside)
+
+
+@pytest.mark.parametrize("runs", ["keep_out", "delete"])
+def test_a_removal_does_not_follow_a_linked_run_or_part_of_one(env, runs):
+    _folder, work = _installed_with_state(env)
+    outside = _outside(env)
+    _folder_link(outside, work / "20261126-213200-e5f6")
+    runId = "20261126-213000-a1b2"
+    _folder_link(outside, work / runId / "linked")
+    env.installer.Remove(PLUGIN, data=True, runs=runs)
+    _untouched(outside)
+    if runs == "keep_out":
+        assert not os.path.lexists(work / "20261126-213200-e5f6")
+        assert os.listdir(work / runId) == ["out"]
+    else:
+        assert not work.exists()
+
+
+def test_a_removal_does_not_follow_a_linked_user_folder_part(env):
+    folder, _work = _installed_with_state(env)
+    outside = _outside(env)
+    _folder_link(outside, folder / "linked")
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert not folder.exists()
+    _untouched(outside)
+    # Kept data: the link inside data/ stays a link (data is the user's).
+    _install_manual(env, name="b.zip")
+    folder = _user_dir(env)
+    (folder / "data").mkdir(exist_ok=True)
+    _folder_link(outside, folder / "other")
+    env.installer.Remove(PLUGIN, data=False, runs="delete")
+    assert not os.path.lexists(folder / "other")
+    _untouched(outside)

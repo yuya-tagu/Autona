@@ -1113,9 +1113,33 @@ def test_a_plugin_is_removed_by_a_job(env):
     assert _refused(env.client.post(url, json={"data": False,
                                                "runs": "keep"}),
                     409, "busy")["message"] == ""
+    # The form only: PluginInstalls decides whether it is known.
+    _refused(env.client.post(f"{BASE}/Not%20an%20id:remove",
+                             json={"data": False, "runs": "keep"}),
+             404, "not_found")
+    env.installs.error = PluginInstallsError(StartRefusal.NOT_FOUND,
+                                             "no such plugin")
     _refused(env.client.post(f"{BASE}/nope.x:remove",
                              json={"data": False, "runs": "keep"}),
              404, "not_found")
+
+
+def test_a_removal_is_answered_after_the_plugin_left_the_list(env):
+    # A failed (partial) removal: the plugin is no longer listed, its
+    # removal still is (failed, and it can be asked again).
+    gone = "gone.plugin"
+    assert env.registry.Get(gone) is None
+    removal = _data(env.client.get(f"{BASE}/{gone}/removal"))
+    assert removal["state"] == "idle"
+    assert env.installs.calls == [("Removal", gone)]
+    _data(env.client.post(f"{BASE}/{gone}:remove",
+                          json={"data": True, "runs": "delete"}), 202)
+    assert env.installs.calls[-1] == ("StartRemoval", gone, True, "delete")
+    _refused(env.client.get(f"{BASE}/Not%20an%20id/removal"), 404,
+             "not_found")
+    env.installs.error = PluginInstallsError(StartRefusal.NOT_FOUND,
+                                             "no such plugin")
+    _refused(env.client.get(f"{BASE}/{gone}/removal"), 404, "not_found")
 
 
 # ── P7: hooks ───────────────────────────────────────────────────────────

@@ -1051,3 +1051,28 @@ def test_a_route_that_reads_no_body_gets_it_whole_and_logs_its_size():
         in text
     with pytest.raises(ValueError):
         v1.write_op("probe.bad", body="raw")
+
+
+def test_an_installs_id_is_cut_in_the_op_log_too():
+    from flask import Blueprint, Flask
+
+    app = Flask(__name__)
+    bp = Blueprint("probe", __name__)
+
+    @bp.route("/installs/<install_id>:consent", methods=["POST"])
+    @v1.write_op("probe.consent")
+    def consent(install_id):
+        return v1.ok()
+
+    app.register_blueprint(bp)
+    lines = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="INFO")
+    try:
+        response = app.test_client().post("/installs/ijklmnopqrst:consent",
+                                          json={"consent_digest": "d"})
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 200
+    text = "\n".join(lines)
+    assert "/installs/ijklmn…:consent op=probe.consent" in text
+    assert "ijklmnopqrst" not in text
