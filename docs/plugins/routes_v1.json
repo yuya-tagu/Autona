@@ -24,7 +24,7 @@
     "DevBody": "{enabled: boolean}",
     "DevFolderBody": "{pick: pick id} (a pickFolder answer)"
   },
-  "pick_answer": "pickFile / pickFolder answer {id, name}: id the pick id the bodies send, name the picked file's or folder's name to show (never the path); nothing when the dialog was closed",
+  "pick_answer": "pickFile / pickFolder (purpose plugin) answer {ok: true, status: \"picked\", id, name}: id the pick id the bodies send, name the picked file's or folder's name to show (never the path); {ok: true, status: \"cancelled\"} when the dialog was closed (nothing held); {ok: false, error} when refused",
   "access_classes": ["this_pc", "shell"],
   "routes": [
     {"method": "GET", "path": "/api/v1/plugins", "endpoint": "api_v1.get_plugins", "access": "this_pc", "stage": "P2",
@@ -118,7 +118,17 @@
      "purpose": "A dev plugin only: run the hook once with the golden input (not counted)."}
   ],
   "shell_verbs": [
-    {"verb": "pickFile", "stage": "P2", "purpose": "A file for a file field, filtered by its extensions; the page gets a pick id and the file's name (pick_answer), never the path (as pickFolder)."},
-    {"verb": "openPluginLink", "stage": "P5b", "purpose": "{source: installed | listing, id, link: homepage | funding | repo}: the host builds the https URL and opens the default browser; the page passes no URL."}
+    {"verb": "pickFolder", "stage": "P2",
+     "args": {"purpose": "assets | plugin"},
+     "answer": "purpose plugin: pick_answer; purpose assets: the game assets' answer ({ok, status, pick, name, games, conflicts, expiresInSec}, for POST /api/v1/assets:importFolder)",
+     "purpose": "A folder for a folder field or a dev folder to add (purpose plugin), or a game folder to import (purpose assets, the existing use); the page never names a folder."},
+    {"verb": "pickFile", "stage": "P2",
+     "args": {"extensions": "the file field's extensions joined by commas: each patterns.file_extension (lower case, no dot), at most patterns.file_extensions_max"},
+     "answer": "pick_answer",
+     "purpose": "A file for a file field, filtered by its extensions; the page gets a pick id and the file's name (pick_answer), never the path (as pickFolder)."},
+    {"verb": "openPluginLink", "stage": "P5b",
+     "args": {"source": "installed | listing", "id": "a plugin id or a listing row's id", "link": "homepage | funding | repo"},
+     "answer": "{ok: true} or {ok: false, error}",
+     "purpose": "{source: installed | listing, id, link: homepage | funding | repo}: the host builds the https URL and opens the default browser; the page passes no URL."}
   ]
 }

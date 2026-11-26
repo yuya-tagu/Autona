@@ -380,7 +380,7 @@ paths:
   別オリジン（プレビュー用のリスナー）か sandbox（`allow-same-origin` なし）のフレームに出し、チケットを渡さない（実 QtWebEngine で pin）
 - 外部へのリンクは `target="_blank"`（ホストがクリックからの http(s) を既定のブラウザに渡す）。例外は Designer（`/web?view=designer` →
   `AutonaDesignerWindow`）と「ブラウザ版を開く」（`/scoreboard` / `/team` → ホストが URL を組み直す）で、どちらもページにトークンを渡さない
-- **シェル要求**（`alwaysOnTop` / `checkUpdates` / `openExternal` / `pickFolder`）は特権の経路（QWebChannel・注入スクリプト）を作らず、クリックの中で
+- **シェル要求**（`alwaysOnTop` / `checkUpdates` / `openExternal` / `pickFolder` / `pickFile` / `openPluginLink`）は特権の経路（QWebChannel・注入スクリプト）を作らず、クリックの中で
   `/web/shell-request?verb=…&request=<id>&ticket=…` を開く形だけ（`web/src/PanelShell/hostApi.ts` の `shellRequest`）
   - ホストはちょうどの形（`ParseShellRequest`）だけを受け、ほかのシェル要求に見える URL（`IsShellRequestShaped`）はブラウザへ渡さずに捨てる。
     ログに URL・クエリ・チケットを出さない
@@ -388,8 +388,13 @@ paths:
     したものだけ。外部アドレスは `src/AutonaExternalLinks.py` の表のキーだけを受け、URL は受けない
   - 新しい動詞は `SHELL_VERBS`・`AutonaShellOperations.ShellRequest`・hostApi.ts の `ShellVerb` と `SHELL_ANSWER_TIMEOUTS_MS` を揃える
     （pin: `tests/test_web_panel_host.py`）
-  - `pickFolder` は引数なし（ページはフォルダを名指せない）。`QFileDialog` を使うのはシェルの `_PickFolder` だけ（AST で pin）。選んだフォルダは
-    `AssetPackService.HoldFolderPick` が持ち、ページには id だけ（パスは答えにもログにも入れない）。検査はジョブレーン、答えは GUI スレッドに戻ってから
+  - ページはファイル・フォルダ・URL を名指せない。引数は値の表か、名前だけを通す型（`SHELL_VERBS`）。`QFileDialog` を使うのはシェルの
+    `_PickGameFolder` / `_PickPluginFolder` / `_PickFile` だけ（AST で pin）。答えにもログにもパスを入れない
+  - `pickFolder` は `purpose` だけを取る。`assets` は取り込むゲームのフォルダで、`AssetPackService.HoldFolderPick` が持ち（検査はジョブレーン、
+    答えは GUI スレッドに戻ってから）、ページには `pick` と名前。`plugin` はプラグインのフォルダで、`pickFile`（引数はファイルの項目の拡張子
+    `extensions`）と同じく core の `ShellPicks` が持ち、ページには `{id, name}`（ADR-009 D4）。プラグインのルートは `ShellPicks.Resolve` で
+    id をパスに戻す
+  - `openPluginLink` は `{source, id, link}` だけを取り、URL は core の `PluginLinks` が導入済みのマニフェスト / 掲載の写しから組む（https だけ）
 
 ## Helpers
 

@@ -154,7 +154,7 @@
           "then": {
             "required": ["extensions"],
             "properties": {
-              "extensions": {"minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]{1,10}$"}},
+              "extensions": {"minItems": 1, "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]{1,10}$"}},
               "default": {"type": "string"}
             }
           }

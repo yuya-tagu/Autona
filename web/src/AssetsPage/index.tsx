@@ -362,6 +362,9 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
     useUnmountCleanup(() => {
         picking.current += 1;
     });
+    // The folder dialog is open: the button waits for its answer (the page
+    // asks for one dialog at a time -- another is refused busy).
+    const [folderOpen, setFolderOpen] = React.useState(false);
 
     const cardBusy = upload.phase === "sending" || asking !== null;
     React.useEffect(() => {
@@ -481,11 +484,14 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
     const pickFolder = () => {
         setNotice(null);
         const mine = ++picking.current;
-        const asked: Promise<ShellResult> = shellRequest("pickFolder");
+        setFolderOpen(true);
+        const asked: Promise<ShellResult> = shellRequest(
+            "pickFolder", {purpose: "assets"});
         asked.then(async (result) => {
             if (mine !== picking.current) {
                 return;
             }
+            setFolderOpen(false);
             if (!result.ok) {
                 setNotice({severity: "error",
                            text: pickFailureText(result.error)});
@@ -500,7 +506,11 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
                 conflicts: result.conflicts ?? [],
                 expiresInSec: result.expiresInSec ?? 0});
         }, (error: {code?: string}) => {
-            if (mine !== picking.current || error?.code === "superseded") {
+            if (mine !== picking.current) {
+                return;
+            }
+            setFolderOpen(false);
+            if (error?.code === "superseded") {
                 return;
             }
             console.error(error);
@@ -567,7 +577,8 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
                     {i18n.t("assets_zip_choose")}
                 </Button>
                 <Button variant="outlined" size="small"
-                        disabled={busy || sending !== null || asking !== null}
+                        disabled={busy || sending !== null || asking !== null
+                                  || folderOpen}
                         onClick={pickFolder}>
                     {i18n.t("assets_folder_choose")}
                 </Button>

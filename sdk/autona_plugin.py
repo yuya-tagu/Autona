@@ -163,6 +163,7 @@ VERSION_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 RUN_ID_PATTERN = r"^[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$"
 ERROR_CODE_PATTERN = r"^[a-z0-9_]{1,64}$"
 FILE_EXTENSION_PATTERN = r"^[a-z0-9]{1,10}$"
+FILE_EXTENSIONS_MAX = 20
 GITHUB_REPO_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$"
 LOCALE_PATTERN = r"^[a-z]{2}(-[A-Z]{2})?$"
 RESERVED_ENTRY_PREFIX = "@"
@@ -1987,7 +1988,8 @@ def _check_type(item, kind, path, where, report, invalid):
             report(bad, f"{path}.default")
     elif kind == "file":
         extensions = item.get("extensions")
-        if not (_is_unique_list(extensions) and extensions and all(
+        if not (_is_unique_list(extensions) and extensions
+                and len(extensions) <= FILE_EXTENSIONS_MAX and all(
                 isinstance(ext, str) and re.fullmatch(FILE_EXTENSION_PATTERN, ext)
                 for ext in extensions)):
             report(invalid, f"{path}.extensions")

@@ -8,6 +8,14 @@
         <translation>Select a game folder to import</translation>
     </message>
     <message>
+        <source>Select a folder</source>
+        <translation>Select a folder</translation>
+    </message>
+    <message>
+        <source>Select a file</source>
+        <translation>Select a file</translation>
+    </message>
+    <message>
         <source>Warning</source>
         <translation>Warning</translation>
     </message>

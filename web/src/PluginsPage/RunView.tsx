@@ -30,8 +30,14 @@ export function refusalText(error: unknown): string {
 // nothing is to be said (a newer request took its place).
 export function pickErrorText(error: unknown): string | null {
     const code = (error as {code?: string} | null)?.code;
-    if (code === "superseded") {
+    if (code === "superseded" || code === "busy") {
+        // A newer pick took over, or another pick's dialog is open: the
+        // operator is picking already.
         return null;
+    }
+    if (code === "bad_extension" || code === "not_local") {
+        // The desktop refused the file or folder picked.
+        return i18n.t(`plugins_pick_${code}`);
     }
     return code === "unknown_verb" || code === "no_session"
         ? i18n.t("plugins_pick_unavailable") : i18n.t("plugins_pick_failed");

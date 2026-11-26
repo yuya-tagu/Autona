@@ -8,6 +8,14 @@
         <translation>取り込むゲームのフォルダを選択</translation>
     </message>
     <message>
+        <source>Select a folder</source>
+        <translation>フォルダを選択</translation>
+    </message>
+    <message>
+        <source>Select a file</source>
+        <translation>ファイルを選択</translation>
+    </message>
+    <message>
         <source>Warning</source>
         <translation>注意</translation>
     </message>

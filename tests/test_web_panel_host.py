@@ -44,6 +44,7 @@ the Web UI's own tests and by Playwright (web/e2e/panel-shell.spec.ts).
 """
 import ast
 import functools
+import itertools
 import json
 import logging
 import socket
@@ -75,6 +76,7 @@ from src.AutonaWebPanelHost import (
     ShellRequest)
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
+from src.core.ShellPicks import ShellPicks
 from src.core.SettingsManager import SettingsManager
 
 ACTIVE = QWebEnginePage.LifecycleState.Active
@@ -1821,9 +1823,30 @@ VALID_SHELL_REQUESTS = [
      ShellRequest("openExternal", "r2", {"target": "discord"})),
     (f"verb=openExternal&target=inquiry&request={'x' * 64}&ticket={_T}",
      ShellRequest("openExternal", "x" * 64, {"target": "inquiry"})),
-    # SF-5a-2: no argument -- the operator names the folder in the dialog.
-    (f"verb=pickFolder&request=r3&ticket={_T}",
-     ShellRequest("pickFolder", "r3", {})),
+    # SF-5a-2: what the folder is for, never a folder -- the operator names
+    # it in the dialog.
+    (f"verb=pickFolder&purpose=assets&request=r3&ticket={_T}",
+     ShellRequest("pickFolder", "r3", {"purpose": "assets"})),
+    (f"verb=pickFolder&purpose=plugin&request=r3&ticket={_T}",
+     ShellRequest("pickFolder", "r3", {"purpose": "plugin"})),
+    # ADR-009 D4: a file field's extensions, never a file.
+    (f"verb=pickFile&extensions=png&request=r4&ticket={_T}",
+     ShellRequest("pickFile", "r4", {"extensions": "png"})),
+    (f"verb=pickFile&extensions=png%2Cjpg%2Cmp4&request=r4&ticket={_T}",
+     ShellRequest("pickFile", "r4", {"extensions": "png,jpg,mp4"})),
+    (f"verb=pickFile&extensions={','.join(['ext'] * 20)}&request=r4"
+     f"&ticket={_T}",
+     ShellRequest("pickFile", "r4", {"extensions": ",".join(["ext"] * 20)})),
+    # A plugin and which of its links, never a URL.
+    (f"verb=openPluginLink&source=installed&id=taguyan.webhook"
+     f"&link=homepage&request=r5&ticket={_T}",
+     ShellRequest("openPluginLink", "r5", {
+         "source": "installed", "id": "taguyan.webhook",
+         "link": "homepage"})),
+    (f"link=repo&id=Some_Row-1&source=listing&verb=openPluginLink"
+     f"&request=r5&ticket={_T}",
+     ShellRequest("openPluginLink", "r5", {
+         "source": "listing", "id": "Some_Row-1", "link": "repo"})),
 ]
 
 
@@ -1859,7 +1882,7 @@ REFUSED_SHELL_REQUESTS = [
     (f"{_B}/web/shell-request?{_Q}&verb=checkUpdates", "query"),
     (f"{_B}/web/shell-request?{_Q}&ticket={_T}", "query"),
     (f"{_B}/web/shell-request?{_Q}&pad={'x' * 512}", "query"),
-    (f"{_B}/web/shell-request?{_Q}&a=1&b=2", "query"),
+    (f"{_B}/web/shell-request?{_Q}&a=1&b=2&c=3&d=4", "query"),
     # No verb, or not one of them.
     (f"{_B}/web/shell-request?", "verb"),
     (f"{_B}/web/shell-request?request=r1&ticket={_T}", "verb"),
@@ -1876,11 +1899,28 @@ REFUSED_SHELL_REQUESTS = [
      "keys"),
     (f"{_B}/web/shell-request?verb=openExternal&url=https://evil.example"
      f"&request=r1&ticket={_T}", "keys"),
-    # A page never names the folder (SF-5a-2).
+    # A page never names the folder (SF-5a-2), nor the file (ADR-009 D4).
     (f"{_B}/web/shell-request?verb=pickFolder&path=C%3A%5CGames"
      f"&request=r1&ticket={_T}", "keys"),
     (f"{_B}/web/shell-request?verb=pickFolder&folder=..&request=r1"
      f"&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?verb=pickFolder&purpose=plugin"
+     f"&path=C%3A%5CGames&request=r1&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?verb=pickFolder&request=r1&ticket={_T}",
+     "keys"),
+    (f"{_B}/web/shell-request?verb=pickFile&request=r1&ticket={_T}",
+     "keys"),
+    (f"{_B}/web/shell-request?verb=pickFile&extensions=png"
+     f"&path=C%3A%5Cx.png&request=r1&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?verb=openPluginLink&source=installed"
+     f"&id=a.b&request=r1&ticket={_T}", "keys"),
+    (f"{_B}/web/shell-request?verb=openPluginLink"
+     f"&id=a.b&link=homepage&url=https%3A%2F%2Fevil.example&request=r1"
+     f"&ticket={_T}", "keys"),
+    # One field more than any verb has is not read.
+    (f"{_B}/web/shell-request?verb=openPluginLink&source=installed"
+     f"&id=a.b&link=homepage&url=https%3A%2F%2Fevil.example&request=r1"
+     f"&ticket={_T}", "query"),
     # An id the answer's script could not carry as it is.
     (f"{_B}/web/shell-request?verb=checkUpdates&request=&ticket={_T}",
      "request"),
@@ -1906,6 +1946,31 @@ REFUSED_SHELL_REQUESTS = [
      "argument"),
     (f"{_B}/web/shell-request?verb=openExternal&target=Discord&request=r1"
      f"&ticket={_T}", "argument"),
+    (f"{_B}/web/shell-request?verb=pickFolder&purpose=Assets&request=r1"
+     f"&ticket={_T}", "argument"),
+    (f"{_B}/web/shell-request?verb=pickFolder&purpose=&request=r1"
+     f"&ticket={_T}", "argument"),
+    # Extensions: lower case, no dot, no wildcard, no blank, no path, at
+    # most 20 of 1-10 characters.
+    *[(f"{_B}/web/shell-request?verb=pickFile&extensions={value}"
+       f"&request=r1&ticket={_T}", "argument") for value in (
+        "", "PNG", ".png", "*.png", "*", "png%2C", "%2Cpng", "png%2C%2Cjpg",
+        "png%20jpg", "png%3Bjpg", "png%2F..", "a" * 11,
+        ",".join(["ext"] * 21), "p%C3%A9g", "png%0A")],
+    # A link: its source and its name from the fixed few, an id that is a
+    # name -- never a URL.
+    *[(f"{_B}/web/shell-request?verb=openPluginLink&source={source}"
+       f"&id={id_}&link={link}&request=r1&ticket={_T}", "argument")
+      for source, id_, link in (
+          ("github", "a.b", "homepage"),
+          ("installed", "a.b", "https%3A%2F%2Fevil.example"),
+          ("installed", "a.b", "url"),
+          ("installed", "https%3A%2F%2Fevil.example", "homepage"),
+          ("installed", "evil.example%2Fx", "homepage"),
+          ("installed", ".hidden", "homepage"),
+          ("installed", "", "homepage"),
+          ("installed", "a" * 65, "homepage"),
+          ("listing", "a%20b", "repo"))],
     # Not the ticket.
     (f"{_B}/web/shell-request?verb=checkUpdates&request=r1&ticket=",
      "ticket"),
@@ -2776,7 +2841,7 @@ def test_a_folder_picked_in_a_click_answers_the_page_without_its_path(
     from src.AutonaShellOperations import AutonaShellOperations
     from src.core import AssetPackService as assets
 
-    folder = str(tmp_path / "private-folder-7Q")
+    folder = str(tmp_path / "private-folder-7Q" / "games")
     stacks = []
 
     def dialog():
@@ -2800,7 +2865,8 @@ def test_a_folder_picked_in_a_click_answers_the_page_without_its_path(
     document = rig.js("window.__loadId")
 
     _clickOpening(rig, f"http://127.0.0.1:{rig.servingPort}"
-                       f"/web/shell-request?verb=pickFolder&request=p1"
+                       f"/web/shell-request?verb=pickFolder"
+                       f"&purpose=assets&request=p1"
                        f"&ticket={issuedTicket}")
     assert _waitUntil(lambda: rig.js("window.__shellResults.length"))
     _waitUntil(lambda: False, timeout=0.3)
@@ -2813,8 +2879,9 @@ def test_a_folder_picked_in_a_click_answers_the_page_without_its_path(
     assert "_OpenOutside" not in stacks[0]
     results = rig.js("window.__shellResults")
     assert results == [["p1", {
-        "ok": True, "status": "picked", "pick": PICK_ID, "games": ["aaa"],
-        "conflicts": [], "expiresInSec": assets.PICK_EXPIRY_SECS}]]
+        "ok": True, "status": "picked", "pick": PICK_ID, "name": "games",
+        "games": ["aaa"], "conflicts": [],
+        "expiresInSec": assets.PICK_EXPIRY_SECS}]]
     assert "private-folder" not in json.dumps(results)
     assert opened == []
     assert rig.js("window.__loadId") == document
@@ -2945,22 +3012,32 @@ def test_every_verb_the_view_takes_is_one_the_shell_runs(monkeypatch):
         CheckForUpdates=lambda silent: None))
     monkeypatch.setattr(ShellModule, "QDesktopServices", SimpleNamespace(
         openUrl=lambda url: True))
-    _folderDialog(monkeypatch, "")
+    _pluginDialogs(monkeypatch, "", "")
     _pickService(monkeypatch)
     operations = _operations(_WindowStandIn())
+    operations.UsePlugins(picks=ShellPicks(), registry=_registry(),
+                          listingRepo=lambda id_: "author/plugin-repo")
+    # An argument given by a pattern: values it takes.
+    samples = {("pickFile", "extensions"): ("png", "png,jpg"),
+               ("openPluginLink", "id"): (LINKED_ID,)}
     unused = []
     for verb, arguments in HostModule.SHELL_VERBS.items():
-        for name, values in arguments.items():
-            for value in values:
-                assert operations.ShellRequest(
-                    verb, {name: value}, unused.append)["ok"], (
-                    verb, name, value)
-        if not arguments:
-            assert operations.ShellRequest(verb, {}, unused.append)["ok"], \
-                verb
+        names = list(arguments)
+        choices = [samples.get((verb, name), arguments[name])
+                   for name in names]
+        for values in itertools.product(*choices):
+            args = dict(zip(names, values))
+            answer = operations.ShellRequest(verb, args, unused.append)
+            # Each one runs: ok, or the verb's own refusal of a link a
+            # source does not offer -- never unknown_verb nor bad_argument.
+            assert answer["ok"] or (
+                verb == "openPluginLink" and answer["error"] == "no_link"), (
+                verb, args, answer)
     assert unused == []
     assert HostModule.SHELL_VERBS["openExternal"] == {
         "target": tuple(EXTERNAL_LINKS)}
+    assert HostModule.SHELL_VERBS["pickFolder"] == {
+        "purpose": ("assets", "plugin")}
 
 
 # ── pickFolder (SF-5a-2) ───────────────────────────────────────────────
@@ -3041,7 +3118,8 @@ def _pick(operations):
     """pickFolder asked: (what ShellRequest returned, the answers given
     later -- a list, filled once settled)."""
     answers = []
-    return operations.ShellRequest("pickFolder", {}, answers.append), answers
+    return operations.ShellRequest("pickFolder", {"purpose": "assets"},
+                                   answers.append), answers
 
 
 def _loguru(level="DEBUG"):
@@ -3056,7 +3134,7 @@ def test_a_picked_folder_is_held_and_answered_without_its_path(
         qapp, monkeypatch, tmp_path, pickLane):
     from src.core import AssetPackService as assets
 
-    folder = str(tmp_path / "private-folder-7Q")
+    folder = str(tmp_path / "private-folder-7Q" / "games")
     window = _WindowStandIn()
     calls = _folderDialog(monkeypatch, folder)
     held = _pickService(monkeypatch)
@@ -3070,8 +3148,9 @@ def test_a_picked_folder_is_held_and_answered_without_its_path(
     finally:
         stop()
 
+    # Its name only (the last part), never the path.
     assert answers == [{"ok": True, "status": "picked", "pick": PICK_ID,
-                        "games": ["aaa"], "conflicts": [],
+                        "name": "games", "games": ["aaa"], "conflicts": [],
                         "expiresInSec": assets.PICK_EXPIRY_SECS}]
     assert held == [folder]
     assert held.threads[0] is not threading.main_thread()
@@ -3114,7 +3193,8 @@ def test_a_closed_folder_dialog_holds_nothing(qapp, monkeypatch, pickLane):
     returned, answers = _pick(_operations(_WindowStandIn()))
 
     assert returned == {"ok": True, "status": "cancelled", "pick": None,
-                        "games": [], "conflicts": [], "expiresInSec": 0}
+                        "name": None, "games": [], "conflicts": [],
+                        "expiresInSec": 0}
     assert len(calls) == 1 and held == []
     assert pickLane.executor.queued() == 0
     pickLane.settle()
@@ -3137,7 +3217,8 @@ def test_no_folder_dialog_before_the_window_and_the_service(
 def test_pick_folder_needs_somewhere_to_answer(qapp, monkeypatch):
     calls = _folderDialog(monkeypatch, "C:/x")
     with pytest.raises(TypeError):
-        _operations(_WindowStandIn()).ShellRequest("pickFolder", {})
+        _operations(_WindowStandIn()).ShellRequest(
+            "pickFolder", {"purpose": "assets"})
     assert calls == []
 
 
@@ -3265,8 +3346,9 @@ def test_a_folder_dialog_that_raises_does_not_keep_the_shell_busy(
 
 
 def test_only_the_shells_pick_opens_a_native_folder_dialog():
-    # The one QFileDialog of src/ (ADR-005: new Qt UI is not added): the
-    # shell request pickFolder's, run from the event loop by the host.
+    # The only QFileDialogs of src/ (ADR-005: new Qt UI is not added): the
+    # shell requests pickFolder's and pickFile's, run from the event loop by
+    # the host.
     from tests.conftest import PROJECT_ROOT
 
     users = []
@@ -3287,7 +3369,456 @@ def test_only_the_shells_pick_opens_a_native_folder_dialog():
                     owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
                 users.append((path.relative_to(PROJECT_ROOT).as_posix(),
                               name))
-    assert users == [("src/AutonaShellOperations.py", "_PickFolder")]
+    assert sorted(set(users)) == [
+        ("src/AutonaShellOperations.py", "_PickFile"),
+        ("src/AutonaShellOperations.py", "_PickGameFolder"),
+        ("src/AutonaShellOperations.py", "_PickPluginFolder")]
+
+
+# ── a plugin's picks and links (ADR-009 D4) ─────────────────────────────
+# pickFile / pickFolder for a plugin: the native dialog over the main
+# window, run from the event loop; core holds the path (ShellPicks) and the
+# page gets its id and name (routes_v1.json pick_answer), never the path.
+# openPluginLink: core builds the URL (PluginLinks) from what the page
+# names; the page never passes one. The core rules are
+# tests/test_plugin_shell_requests.py's.
+
+LINKED_ID = "taguyan.webhook"
+HOMEPAGE = "https://example.com/webhook"
+FUNDING = "https://example.com/sponsor"
+
+
+def _registry(state="ready", homepage=HOMEPAGE, funding=FUNDING):
+    """PluginRegistry as openPluginLink reads it: Get(LINKED_ID) only."""
+    from src.core.PluginTypes import PluginState
+
+    plugin = SimpleNamespace(
+        state=PluginState(state), report=SimpleNamespace(
+            manifest=SimpleNamespace(homepage=homepage, funding=funding)))
+    return SimpleNamespace(Get=lambda id_: plugin if id_ == LINKED_ID
+                           else None)
+
+
+def _pluginDialogs(monkeypatch, folder, file):
+    """QFileDialog as AutonaShellOperations sees it: getExistingDirectory
+    answers ``folder``, getOpenFileName ``(file, its filter)`` (each called
+    when callable); both record their calls."""
+    from src import AutonaShellOperations as ShellModule
+
+    calls = []
+
+    def getExistingDirectory(parent, title, start):
+        calls.append(("folder", parent, title, start))
+        return folder() if callable(folder) else folder
+
+    def getOpenFileName(parent, title, start, nameFilter):
+        calls.append(("file", parent, title, start, nameFilter))
+        path = file() if callable(file) else file
+        return path, nameFilter if path else ""
+
+    monkeypatch.setattr(ShellModule, "QFileDialog", SimpleNamespace(
+        getExistingDirectory=getExistingDirectory,
+        getOpenFileName=getOpenFileName))
+    return calls
+
+
+def _pluginShell(picks, window="standIn"):
+    operations = _operations(_WindowStandIn() if window == "standIn"
+                             else window)
+    operations.UsePlugins(picks=picks)
+    return operations
+
+
+def _numbered():
+    count = iter(range(1, 1000))
+    return lambda: f"pick-{next(count)}"
+
+
+PLUGIN_FOLDER = {"purpose": "plugin"}
+
+
+def test_a_plugins_folder_is_held_and_answered_by_its_id_and_name(
+        qapp, monkeypatch, tmp_path):
+    folder = tmp_path / "private-parent-7Q" / "MyFolder"
+    folder.mkdir(parents=True)
+    picks = ShellPicks(newId=_numbered())
+    window = _WindowStandIn()
+    calls = _pluginDialogs(monkeypatch, str(folder), "")
+    held = _pickService(monkeypatch)
+    answers = []
+    lines, stop = _loguru()
+    try:
+        returned = _pluginShell(picks, window).ShellRequest(
+            "pickFolder", PLUGIN_FOLDER, answers.append)
+    finally:
+        stop()
+
+    # Answered now (nothing probed), by id and name.
+    assert returned == {"ok": True, "status": "picked", "id": "pick-1",
+                        "name": "MyFolder"}
+    assert answers == [] and held == []
+    assert picks.Resolve("folder", "pick-1") == str(folder)
+    assert picks.Resolve("file", "pick-1") is None
+    assert [call[:3] for call in calls] == [("folder", window, (
+        QCoreApplication.translate("app", "Select a folder")))]
+    assert "private-parent" not in json.dumps(returned)
+    assert "private-parent" not in "\n".join(lines)
+
+
+def test_a_plugins_file_is_picked_among_its_fields_extensions(
+        qapp, monkeypatch, tmp_path):
+    file = tmp_path / "private-parent-7Q" / "Logo.PNG"
+    file.parent.mkdir()
+    file.write_bytes(b"x")
+    picks = ShellPicks(newId=_numbered())
+    window = _WindowStandIn()
+    calls = _pluginDialogs(monkeypatch, "", str(file))
+    lines, stop = _loguru()
+    try:
+        returned = _pluginShell(picks, window).ShellRequest(
+            "pickFile", {"extensions": "png,jpg,png"})
+    finally:
+        stop()
+
+    assert returned == {"ok": True, "status": "picked", "id": "pick-1",
+                        "name": "Logo.PNG"}
+    assert picks.Resolve("file", "pick-1") == str(file)
+    assert picks.Resolve("folder", "pick-1") is None
+    # Over the main window, filtered by the extensions (each once).
+    assert [call[:3] + call[4:] for call in calls] == [(
+        "file", window, QCoreApplication.translate("app", "Select a file"),
+        "*.png *.jpg")]
+    assert "private-parent" not in json.dumps(returned)
+    assert "private-parent" not in "\n".join(lines)
+
+
+def test_the_plugin_dialogs_open_on_the_documents_folder(
+        qapp, monkeypatch, tmp_path):
+    from src import AutonaShellOperations as ShellModule
+
+    monkeypatch.chdir(tmp_path)
+    calls = _pluginDialogs(monkeypatch, "", "")
+    operations = _pluginShell(ShellPicks())
+    operations.ShellRequest("pickFolder", PLUGIN_FOLDER)
+    operations.ShellRequest("pickFile", {"extensions": "png"})
+    assert [call[3] for call in calls] == [ShellModule._StartFolder()] * 2
+    assert calls[0][3] != str(tmp_path)
+
+
+def test_a_closed_plugin_dialog_holds_nothing(qapp, monkeypatch):
+    picks = ShellPicks()
+    _pluginDialogs(monkeypatch, "", "")
+    operations = _pluginShell(picks)
+    for verb, args in (("pickFolder", PLUGIN_FOLDER),
+                       ("pickFile", {"extensions": "png"})):
+        assert operations.ShellRequest(verb, args) == {
+            "ok": True, "status": "cancelled"}
+    assert picks.Count() == 0
+
+
+def test_a_file_of_another_extension_is_refused(qapp, monkeypatch,
+                                                tmp_path):
+    # The dialog's name box takes any name: the shell checks the picked
+    # file against the field's extensions.
+    picks = ShellPicks()
+    operations = _pluginShell(picks)
+    for name in ("notes.txt", "noextension", "image.png.exe"):
+        _pluginDialogs(monkeypatch, "", str(tmp_path / name))
+        assert operations.ShellRequest(
+            "pickFile", {"extensions": "png"}) == {
+            "ok": False, "error": "bad_extension"}
+    assert picks.Count() == 0
+
+
+@pytest.mark.parametrize("path", [
+    r"\\server\share\private-folder", "//server/share/private-folder",
+    r"\\?\C:\private-folder", "relative\\private-folder"])
+def test_a_pick_off_this_pcs_drives_is_refused(qapp, monkeypatch, path):
+    picks = ShellPicks()
+    operations = _pluginShell(picks)
+    lines, stop = _loguru()
+    try:
+        _pluginDialogs(monkeypatch, path, path + ".png")
+        assert operations.ShellRequest("pickFolder", PLUGIN_FOLDER) == {
+            "ok": False, "error": "not_local"}
+        assert operations.ShellRequest(
+            "pickFile", {"extensions": "png"}) == {
+            "ok": False, "error": "not_local"}
+    finally:
+        stop()
+    assert picks.Count() == 0
+    assert "private-folder" not in "\n".join(lines)
+
+
+@pytest.mark.parametrize("verb, args", [
+    ("pickFolder", {}), ("pickFolder", {"purpose": "games"}),
+    ("pickFolder", {"purpose": None}),
+    ("pickFile", {}), ("pickFile", {"extensions": "PNG"}),
+    ("pickFile", {"extensions": ".png"}), ("pickFile", {"extensions": "*"}),
+    ("pickFile", {"extensions": "png,"}),
+    ("pickFile", {"extensions": ",".join(["ext"] * 21)}),
+])
+def test_a_pick_off_its_arguments_opens_no_dialog(qapp, monkeypatch, verb,
+                                                  args):
+    calls = _pluginDialogs(monkeypatch, "C:/x", "C:/x.png")
+    assert _pluginShell(ShellPicks()).ShellRequest(verb, args) == {
+        "ok": False, "error": "bad_argument"}
+    assert calls == []
+
+
+def test_no_plugin_dialog_before_the_window_and_the_picks(qapp,
+                                                          monkeypatch):
+    calls = _pluginDialogs(monkeypatch, "C:/x", "C:/x.png")
+    for operations in (_pluginShell(ShellPicks(), window=None),
+                       _operations(_WindowStandIn())):
+        assert operations.ShellRequest("pickFolder", PLUGIN_FOLDER) == {
+            "ok": False, "error": "not_ready"}
+        assert operations.ShellRequest(
+            "pickFile", {"extensions": "png"}) == {
+            "ok": False, "error": "not_ready"}
+    assert calls == []
+
+
+def test_no_plugin_dialog_nor_pick_once_the_app_is_shutting_down(
+        qapp, monkeypatch, tmp_path):
+    from src.Helpers import AutonaQtHelper
+
+    picks = ShellPicks()
+    operations = _pluginShell(picks)
+    stopping = {"now": True}
+    monkeypatch.setattr(AutonaQtHelper, "gui_unavailable_reason",
+                        lambda: "shutting down" if stopping["now"] else None)
+    calls = _pluginDialogs(monkeypatch, str(tmp_path), "")
+    assert operations.ShellRequest("pickFolder", PLUGIN_FOLDER) == {
+        "ok": False, "error": "unavailable"}
+    assert calls == []
+
+    # Begun while the dialog was open: nothing held.
+    stopping["now"] = False
+
+    def shutDownMeanwhile():
+        stopping["now"] = True
+        return str(tmp_path)
+
+    _pluginDialogs(monkeypatch, shutDownMeanwhile, "")
+    assert operations.ShellRequest("pickFolder", PLUGIN_FOLDER) == {
+        "ok": False, "error": "unavailable"}
+    assert picks.Count() == 0
+
+
+def test_one_pick_at_a_time_of_either_kind(qapp, monkeypatch, tmp_path,
+                                           pickLane):
+    # A dialog runs an event loop of its own: a pick that reaches the shell
+    # meanwhile -- a plugin's file or folder, a game folder -- is answered
+    # busy and opens no second dialog; so is a plugin's pick while a game
+    # folder picked is probed.
+    picks = ShellPicks()
+    operations = _pluginShell(picks)
+    _pickService(monkeypatch)
+    inner = []
+
+    def whileOpen():
+        inner.append(operations.ShellRequest("pickFile",
+                                             {"extensions": "png"}))
+        inner.append(operations.ShellRequest("pickFolder", PLUGIN_FOLDER))
+        inner.append(_pick(operations)[0])
+        return str(tmp_path)
+
+    calls = _pluginDialogs(monkeypatch, whileOpen, "")
+    assert operations.ShellRequest("pickFolder", PLUGIN_FOLDER)["status"] \
+        == "picked"
+    assert inner == [{"ok": False, "error": "busy"}] * 3
+    assert len(calls) == 1
+
+    # A game folder being probed.
+    _pluginDialogs(monkeypatch, str(tmp_path), "")
+    returned, answers = _pick(operations)
+    assert returned is None
+    assert operations.ShellRequest("pickFile", {"extensions": "png"}) == {
+        "ok": False, "error": "busy"}
+    pickLane.settle()
+    assert answers[0]["status"] == "picked"
+    # Over: the next one opens.
+    assert operations.ShellRequest("pickFile", {"extensions": "png"}) == {
+        "ok": True, "status": "cancelled"}
+
+
+def test_a_plugin_dialog_that_raises_does_not_keep_the_shell_busy(
+        qapp, monkeypatch):
+    operations = _pluginShell(ShellPicks())
+
+    def broken():
+        raise RuntimeError("no dialog")
+
+    for verb, args in (("pickFolder", PLUGIN_FOLDER),
+                       ("pickFile", {"extensions": "png"})):
+        _pluginDialogs(monkeypatch, broken, broken)
+        with pytest.raises(RuntimeError):
+            operations.ShellRequest(verb, args)
+        _pluginDialogs(monkeypatch, "", "")
+        assert operations.ShellRequest(verb, args)["status"] == "cancelled"
+
+
+def _browser(monkeypatch, works=True):
+    from src import AutonaShellOperations as ShellModule
+
+    opened = []
+
+    def openUrl(url):
+        opened.append(url.toString())
+        return works
+
+    monkeypatch.setattr(ShellModule, "QDesktopServices", SimpleNamespace(
+        openUrl=openUrl))
+    return opened
+
+
+def _link(operations, source, link, id_=LINKED_ID):
+    return operations.ShellRequest("openPluginLink", {
+        "source": source, "id": id_, "link": link})
+
+
+def test_a_plugins_link_opens_the_url_the_host_builds(qapp, monkeypatch):
+    opened = _browser(monkeypatch)
+    operations = _operations(_WindowStandIn())
+    operations.UsePlugins(registry=_registry(),
+                          listingRepo=lambda id_: "author/plugin-repo")
+    lines, stop = _loguru()
+    try:
+        assert _link(operations, "installed", "homepage") == {"ok": True}
+        assert _link(operations, "installed", "funding") == {"ok": True}
+        assert _link(operations, "listing", "repo") == {"ok": True}
+    finally:
+        stop()
+    assert opened == [HOMEPAGE, FUNDING,
+                      "https://github.com/author/plugin-repo"]
+    assert "example.com" not in "\n".join(lines)
+
+
+def test_a_plugins_link_is_refused_by_its_code(qapp, monkeypatch):
+    opened = _browser(monkeypatch)
+    bare = _operations(_WindowStandIn())
+    # Nothing wired yet: neither the registry nor the listing (P5b).
+    assert _link(bare, "installed", "homepage") == {
+        "ok": False, "error": "not_ready"}
+    assert _link(bare, "listing", "repo") == {
+        "ok": False, "error": "not_ready"}
+
+    operations = _operations(_WindowStandIn())
+    operations.UsePlugins(registry=_registry(funding=None),
+                          listingRepo=lambda id_: None)
+    for source, link, id_, error in (
+            ("installed", "homepage", "other.plugin", "unknown_plugin"),
+            ("listing", "repo", LINKED_ID, "unknown_plugin"),
+            ("installed", "funding", LINKED_ID, "no_link"),
+            ("installed", "repo", LINKED_ID, "no_link"),
+            ("listing", "homepage", LINKED_ID, "no_link")):
+        assert _link(operations, source, link, id_) == {
+            "ok": False, "error": error}, (source, link, id_)
+
+    blocked = _operations(_WindowStandIn())
+    blocked.UsePlugins(registry=_registry(state="blocked"))
+    assert _link(blocked, "installed", "homepage") == {
+        "ok": False, "error": "blocked"}
+
+    # What the registry or the listing holds is checked again.
+    for registry, listing in (
+            (_registry(homepage="http://example.com/x"), None),
+            (_registry(homepage="https://user@example.com/x"), None),
+            (_registry(homepage="javascript:alert(1)"), None),
+            (None, lambda id_: "author/.."),
+            (None, lambda id_: "evil.example/x/y")):
+        checked = _operations(_WindowStandIn())
+        checked.UsePlugins(registry=registry, listingRepo=listing)
+        source, link = ("installed", "homepage") if registry else (
+            "listing", "repo")
+        assert _link(checked, source, link) == {
+            "ok": False, "error": "bad_link"}, (registry, listing)
+    assert opened == []
+
+    for source, link in (("github", "homepage"), ("installed", "url")):
+        assert _link(operations, source, link) == {
+            "ok": False, "error": "bad_argument"}
+
+
+def test_a_plugins_link_the_system_cannot_open(qapp, monkeypatch):
+    _browser(monkeypatch, works=False)
+    operations = _operations(_WindowStandIn())
+    operations.UsePlugins(registry=_registry())
+    assert _link(operations, "installed", "homepage") == {
+        "ok": False, "error": "open_failed"}
+
+
+def test_use_plugins_keeps_what_it_is_not_given():
+    picks, registry = ShellPicks(), _registry()
+    operations = _operations()
+    operations.UsePlugins(picks=picks)
+    operations.UsePlugins(registry=registry)
+    assert (operations._picks, operations._registry) == (picks, registry)
+
+
+def test_the_longest_file_request_fits_the_query_the_view_reads():
+    # 20 extensions of 10 characters, the commas escaped as the page's
+    # URLSearchParams does, the longest request id, a ticket as long as the
+    # one this process issues (token_urlsafe(32)).
+    import secrets
+
+    from src.core.ShellPicks import FILE_EXTENSIONS_MAX
+
+    assert len(SHELL_TICKET) == len(secrets.token_urlsafe(32))
+    extensions = ",".join(f"{n:010d}" for n in range(FILE_EXTENSIONS_MAX))
+    query = (f"verb=pickFile&extensions={quote(extensions, safe='')}"
+             f"&request={'r' * 64}&ticket={SHELL_TICKET}")
+    assert len(query) <= HostModule._SHELL_QUERY_MAX
+    request, reason = _checkShellRequest(f"{SHELL_URL}?{query}")
+    assert reason is None and request.args == {"extensions": extensions}
+
+
+def test_a_link_the_core_takes_is_one_qt_opens():
+    # PluginLinks.SafeHttpsUrl is as strict as QUrl's StrictMode, which the
+    # shell parses the URL with before it opens it.
+    from src.core.PluginLinks import SafeHttpsUrl
+
+    for url in ("https://example.com/", "https://sub.example.co.jp:8443/a/b",
+                "https://example.com/a%20b?q=1&r=(2)*3+4,5;6=7!$'~_.-@:#top",
+                "https://github.com/author/plugin.repo"):
+        assert SafeHttpsUrl(url) and QUrl(
+            url, QUrl.ParsingMode.StrictMode).isValid(), url
+    for url in ("https://example.com/a|b", "https://example.com/{x}",
+                "https://example.com/a^b", "https://example.com/<x>",
+                "https://example.com/%zz", 'https://example.com/"x"'):
+        assert not SafeHttpsUrl(url), url
+        assert not QUrl(url, QUrl.ParsingMode.StrictMode).isValid(), url
+
+
+def test_the_contracts_ledger_names_the_verbs_arguments():
+    # docs/plugins/routes_v1.json shell_verbs: each verb's arguments are
+    # SHELL_VERBS' (a fixed list is written "a | b").
+    from tests.conftest import PROJECT_ROOT
+
+    ledger = json.loads((PROJECT_ROOT / "docs" / "plugins" / "routes_v1.json")
+                        .read_text(encoding="utf-8"))["shell_verbs"]
+    for row in ledger:
+        arguments = HostModule.SHELL_VERBS[row["verb"]]
+        assert set(row["args"]) == set(arguments), row["verb"]
+        for name, values in arguments.items():
+            if isinstance(values, tuple):
+                assert row["args"][name] == " | ".join(values), (
+                    row["verb"], name)
+
+
+def test_the_page_checks_a_files_extensions_as_the_view_does():
+    import re
+
+    from src.core import ShellPicks as PicksModule
+    from tests.conftest import PROJECT_ROOT
+
+    source = (PROJECT_ROOT / "web" / "src" / "PanelShell" / "hostApi.ts"
+              ).read_text(encoding="utf-8")
+    assert (f"PICK_FILE_EXTENSIONS_MAX = {PicksModule.FILE_EXTENSIONS_MAX};"
+            in source)
+    assert "PICK_FILE_EXTENSION = /^[a-z0-9]{1,10}$/;" in source
+    assert re.search(r"pickFile: null,", source)
 
 
 def test_the_page_and_the_view_agree_on_the_shell_requests():

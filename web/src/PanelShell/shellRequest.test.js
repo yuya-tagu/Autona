@@ -2,7 +2,7 @@
 // read before the click (GET /api/v1/shell-session) and kept in the module
 // only, the window opened in the click itself, the answer awaited by the
 // request's id for its verb's deadline (SHELL_ANSWER_TIMEOUTS_MS; none for
-// pickFolder), and the desktop's state heard.
+// pickFolder and pickFile), and the desktop's state heard.
 // What the desktop does with the window is src/AutonaWebPanelHost.py's
 // (tests/test_web_panel_host.py).
 
@@ -145,17 +145,18 @@ test("no answer within the deadline rejects, and a late one is dropped", async (
     host.receiveShellResult(request, {ok: true});
 });
 
-test("the deadline is each verb's: the folder dialog has none", async () => {
-    // SF-5a-2: pickFolder answers when the operator closes the desktop's
-    // folder dialog, however long that takes.
+test("the deadline is each verb's: the dialogs have none", async () => {
+    // SF-5a-2 / ADR-009 D4: pickFolder and pickFile answer when the
+    // operator closes the desktop's dialog, however long that takes.
     expect(host.SHELL_ANSWER_TIMEOUTS_MS).toEqual({
         alwaysOnTop: 10000, checkUpdates: 10000, openExternal: 10000,
-        pickFolder: null});
+        pickFolder: null, pickFile: null, openPluginLink: 10000});
     await host.loadShellSession();
     jest.useFakeTimers();
-    const asked = host.shellRequest("pickFolder");
+    const asked = host.shellRequest("pickFolder", {purpose: "assets"});
     const query = openedQuery();
-    expect(Object.keys(query).sort()).toEqual(["request", "ticket", "verb"]);
+    expect(Object.keys(query).sort()).toEqual(
+        ["purpose", "request", "ticket", "verb"]);
     expect(query.verb).toBe("pickFolder");
 
     jest.advanceTimersByTime(60 * 60 * 1000);
@@ -165,14 +166,71 @@ test("the deadline is each verb's: the folder dialog has none", async () => {
     await expect(asked).resolves.toEqual(picked);
 });
 
-test("a newer folder request supersedes the one waiting", async () => {
+test("a file request waits for its dialog and carries its extensions", async () => {
     await host.loadShellSession();
-    const first = host.shellRequest("pickFolder");
-    const second = host.shellRequest("pickFolder");
-    await expect(first).rejects.toMatchObject({code: "superseded"});
+    jest.useFakeTimers();
+    const asked = host.shellRequest(
+        "pickFile", {extensions: host.pickFileArgument(["png", "jpg"])});
+    const query = openedQuery();
+    expect(query).toEqual({verb: "pickFile", extensions: "png,jpg",
+                           request: query.request, ticket: TICKET});
+    jest.advanceTimersByTime(60 * 60 * 1000);
+    const picked = {ok: true, status: "picked", id: "p1", name: "logo.png"};
+    host.receiveShellResult(query.request, picked);
+    await expect(asked).resolves.toEqual(picked);
+});
+
+test("a file's extensions are checked as the desktop checks them", () => {
+    expect(host.pickFileArgument(["png"])).toBe("png");
+    expect(host.pickFileArgument(["png", "jpg", "png"])).toBe("png,jpg");
+    expect(host.pickFileArgument(Array(20).fill(0).map((_, i) => `e${i}`)))
+        .toBe(Array(20).fill(0).map((_, i) => `e${i}`).join(","));
+    for (const bad of [[], ["PNG"], [".png"], ["*.png"], ["*"], [""],
+                       ["png jpg"], ["a".repeat(11)], ["pég"],
+                       ["png,jpg"],
+                       Array(21).fill(0).map((_, i) => `e${i}`)]) {
+        expect(host.pickFileArgument(bad)).toBeNull();
+    }
+});
+
+test("a plugin's link waits ten seconds", async () => {
+    await host.loadShellSession();
+    jest.useFakeTimers();
+    const asked = host.shellRequest(
+        "openPluginLink", {source: "installed", id: "a.b", link: "homepage"});
+    expect(openedQuery()).toMatchObject(
+        {verb: "openPluginLink", source: "installed", id: "a.b",
+         link: "homepage"});
+    jest.advanceTimersByTime(10000);
+    await expect(asked).rejects.toMatchObject({code: "timeout"});
+});
+
+test("a dialog's request while one waits is busy, and the waiting one stays", async () => {
+    // A double click, or a pick of another purpose or kind: the desktop has
+    // one dialog open and would answer the second one busy, while the
+    // first one's answer -- what the operator picks -- would find no one
+    // waiting if it were superseded.
+    await host.loadShellSession();
+    const first = host.shellRequest("pickFolder", {purpose: "plugin"});
     const {request} = openedQuery();
-    host.receiveShellResult(request, {ok: true, status: "cancelled"});
-    await expect(second).resolves.toEqual({ok: true, status: "cancelled"});
+    for (const [verb, args] of [
+        ["pickFolder", {purpose: "plugin"}],
+        ["pickFolder", {purpose: "assets"}],
+        ["pickFile", {extensions: "png"}]]) {
+        await expect(host.shellRequest(verb, args))
+            .rejects.toMatchObject({code: "busy"});
+    }
+    expect(opened).toHaveLength(1);
+    // Another kind of request still goes.
+    host.shellRequest("alwaysOnTop", {on: "1"});
+    expect(opened).toHaveLength(2);
+
+    const picked = {ok: true, status: "picked", id: "p1", name: "MyFolder"};
+    host.receiveShellResult(request, picked);
+    await expect(first).resolves.toEqual(picked);
+    // Answered: the next one is sent.
+    host.shellRequest("pickFile", {extensions: "png"});
+    expect(opened).toHaveLength(3);
 });
 
 test("a newer request of a verb supersedes the older one", async () => {

@@ -139,7 +139,10 @@ export function requestFullState(): void {
 // What a page asks of the desktop itself: the window's "always on top", the
 // update check, one of a fixed few outside addresses, a game folder to import
 // (SF-5a-2: the desktop's own folder dialog; the page gets an id for the
-// folder, never its path). There is no privileged
+// folder, never its path), a file or folder for a plugin (ADR-009 D4:
+// pickFile / pickFolder with purpose "plugin"; an id and a name, never the
+// path) and a plugin's link (openPluginLink: the page names the link, the
+// desktop builds the URL). There is no privileged
 // channel: in a click, the page opens a new window of this server's
 // /web/shell-request carrying the verb, an id and the ticket, which the
 // desktop's shared view takes instead of opening a window
@@ -161,18 +164,44 @@ export const SHELL_REQUEST_PATH = "/web/shell-request";
 export const SHELL_ANSWER_TIMEOUT_MS = 10000;
 
 export type ShellVerb = "alwaysOnTop" | "checkUpdates" | "openExternal"
-    | "pickFolder";
+    | "pickFolder" | "pickFile" | "openPluginLink";
 
-// Each verb's wait for its answer (ms), or null: none. pickFolder answers
-// when the operator closes the folder dialog, which takes as long as it
-// takes; a newer request of it (superseded) or the page going away ends
-// the wait instead.
+// Each verb's wait for its answer (ms), or null: none. pickFolder and
+// pickFile answer when the operator closes the dialog, which takes as long
+// as it takes; a newer request of it (superseded) or the page going away
+// ends the wait instead.
 export const SHELL_ANSWER_TIMEOUTS_MS: Record<ShellVerb, number | null> = {
     alwaysOnTop: SHELL_ANSWER_TIMEOUT_MS,
     checkUpdates: SHELL_ANSWER_TIMEOUT_MS,
     openExternal: SHELL_ANSWER_TIMEOUT_MS,
     pickFolder: null,
+    pickFile: null,
+    openPluginLink: SHELL_ANSWER_TIMEOUT_MS,
 };
+
+// pickFolder's argument `purpose`: a game folder to import (the answer's
+// `pick` is for v1's POST /assets:importFolder) or a plugin's folder (the
+// answer's `id` is a pick id for the plugin routes).
+export type PickFolderPurpose = "assets" | "plugin";
+
+// pickFile's argument `extensions`: a file field's extensions (lower case,
+// no dot, 1-10 of [a-z0-9]) joined by commas, at most this many -- what the
+// desktop takes (src/core/ShellPicks.py EXTENSIONS_ARGUMENT_PATTERN). A
+// request the desktop would refuse gets no answer at all, so the page checks
+// first (pickFileArgument).
+export const PICK_FILE_EXTENSIONS_MAX = 20;
+const PICK_FILE_EXTENSION = /^[a-z0-9]{1,10}$/;
+
+// The `extensions` argument for `extensions`, each once in order; null when
+// there is none or one the desktop would refuse.
+export function pickFileArgument(extensions: readonly string[]): string | null {
+    const unique = Array.from(new Set(extensions));
+    if (unique.length === 0 || unique.length > PICK_FILE_EXTENSIONS_MAX
+        || !unique.every((ext) => PICK_FILE_EXTENSION.test(ext))) {
+        return null;
+    }
+    return unique.join(",");
+}
 
 // The desktop's answer as it sent it: ok, or the error's code.
 export interface ShellResult {
@@ -180,11 +209,15 @@ export interface ShellResult {
     error?: string;
     // alwaysOnTop's: the window's state after it.
     alwaysOnTop?: boolean;
-    // pickFolder's: "picked" (the desktop holds the folder under `pick`,
-    // for v1's POST /assets:importFolder, for `expiresInSec`) or
-    // "cancelled" (the dialog was closed; nothing held).
+    // pickFolder's and pickFile's: "picked" or "cancelled" (the dialog was
+    // closed; nothing held). For a game folder (purpose "assets") the
+    // desktop holds it under `pick`, for v1's POST /assets:importFolder, for
+    // `expiresInSec`; for a plugin's pick under `id` (routes_v1.json
+    // pick_answer). `name` is the file's or folder's name, never the path.
     status?: "picked" | "cancelled";
     pick?: string | null;
+    id?: string;
+    name?: string | null;
     games?: string[];
     conflicts?: string[];
     expiresInSec?: number;
@@ -198,7 +231,7 @@ export interface ShellState {
 // Why a request got no answer: "no_session" (no ticket read: not the shared
 // view, or loadShellSession() not done), "timeout", "superseded" (a newer
 // request of the same verb: the desktop keeps each verb's newest answer
-// only).
+// only), "busy" (a dialog's request while one is waiting: not sent).
 export type ShellRequestError = Error & {code: string};
 
 interface Envelope<T> {
@@ -279,6 +312,15 @@ export function shellRequest(verb: ShellVerb,
     Promise<ShellResult> {
     if (shellTicket === null) {
         return Promise.reject(shellRequestError("no_session"));
+    }
+    if (SHELL_ANSWER_TIMEOUTS_MS[verb] === null && Array.from(
+        pendingRequests.values()).some(
+        (other) => SHELL_ANSWER_TIMEOUTS_MS[other.verb] === null)) {
+        // A dialog's request (pickFolder / pickFile) while another one
+        // waits: the desktop opens one dialog at a time and answers this one
+        // busy at once, and superseding the waiting one would drop what the
+        // operator picks in the open dialog. Not sent; the waiting one stays.
+        return Promise.reject(shellRequestError("busy"));
     }
     const id = nextRequestId();
     // The fixed keys last: an argument cannot stand in for one of them.
