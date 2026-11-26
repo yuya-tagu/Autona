@@ -14,9 +14,11 @@ Board 1 (1on1) only: ``set_id``, ``phase``, ``match`` (the round),
 ``teamsSwapped``, each team's ``score`` and its first player's ``name`` (the
 tag) and first character's ``codename`` (its ``name`` when it has none: a
 character the catalog does not know; the catalog is not read); the loaded
-game's codename; and the tournament's display name
+game's codename; the tournament's display name
 (``tournamentInfo.displayTournamentName``, its ``tournamentName`` when that
-is empty). Each publish -- ``state_updated``, and ``state_big_change``,
+is empty); and the board's ``best_of``, which only match_decided reads
+(below: a publish changing nothing else is no change to the record). Each
+publish -- ``state_updated``, and ``state_big_change``,
 which carries no delta (a set load on the desktop is often one) -- reads
 those values as published (``StateManager.GetCommitted``) and compares them
 with the open record. The delta rows are not used: a big change has none,
@@ -90,13 +92,50 @@ game set aside is put back) and closes it -- the boards are reset at
 launch, so nothing continues it -- and lets the writer finish. Old files
 are not removed.
 
+match_decided (ADR-009 D.1)
+---------------------------
+After a publish has been taken into the records, each record it touched --
+the open one, and the one it closed when a new record started -- is
+judged: a record is *decided* when it has counted a game (``games`` not
+empty: a loaded set's baseline alone, or a record's beginning, is not)
+and ``max(score) >= T``, ``T = best_of // 2 + 1`` (a majority; a
+``best_of`` of 0, not set, decides nothing). The record a publish closes
+is judged with the ``best_of`` of the publish before (one changed in the
+publish that starts a new record is the new match's, as everything else in
+it is). So a ``best_of`` entered after the games decides with that
+publish, and names and a score typed together decide when that score is
+a majority.
+
+The service tells the hooks' dispatcher (``hooks``, injected; None does
+nothing) of a decided record with ``MatchCandidate(id, line)`` -- the
+line the record has now with ``closed: false`` -- when it becomes decided,
+and again with the new line each time its line changes while it stays
+decided (a game counted, the swap, a set-aside game put back on its
+close). A record no longer decided after a candidate (a game taken back,
+a larger ``best_of``) gets ``MatchWithdrawn(id)``. A record closing stays
+as it was (decided or not): closing withdraws nothing. A candidate is only
+told while ``Wanted(HookEvent.MATCH_DECIDED)`` is true (no enabled hook:
+nothing queued); a withdrawal is told whenever a candidate was. The wait
+before it fires and the "fired" mark are the dispatcher's, not this
+service's. Nothing is told on ``Shutdown`` (no publish). Known limit: a
+game set aside by a 1 -> 0 and put back when the record closes is told
+then, as the closed record's line with ``closed: false``.
+
+What the dispatcher does with it is no part of the record: the line has
+been handed to the writer before, and a dispatcher that fails is logged
+and the following goes on.
+
 Threads and locks
 -----------------
 The observer runs inside ``StateManager.lock`` (the publish that delivers
 it). There it reads, updates the record in memory and hands the line to a
 writer thread (``AutonaMatchLog``, daemon, started by ``Start``): it writes
 no state, waits for nothing and calls no ``GameAssetCatalog`` writer
-(pitfalls #16 #17). The record is only touched with
+(pitfalls #16 #17). The dispatcher's ``Wanted`` / ``MatchCandidate`` /
+``MatchWithdrawn`` are called there too, holding ``StateManager.lock``: they
+only queue, under a leaf lock of the dispatcher's own (taken after
+``StateManager.lock``, never the other way round; no I/O, no other lock,
+no wait inside it), as the writer's queue below. The record is only touched with
 ``StateManager.lock`` held (the observer, ``Start``, ``Shutdown``). The
 writer's queue has a lock of its own, a leaf: taken after
 ``StateManager.lock``, never the other way round, and held for no I/O and
@@ -137,6 +176,7 @@ from datetime import datetime
 from loguru import logger
 
 from . import StateSchema as schema
+from .PluginTypes import HookEvent
 from .StateManager import StateManager
 
 MATCH_LOG_DIR = os.path.join(".", "user_data", "match_log")
@@ -157,7 +197,7 @@ RETRY_DELAYS = (0.5, 2.0, 5.0)
 # What a publish shows of the board, as compared with the record.
 _Shown = collections.namedtuple(
     "_Shown",
-    "setId swapped game tournament phase round p1 p2 c1 c2 score")
+    "setId swapped game tournament phase round p1 p2 c1 c2 score bestOf")
 
 # What a played record takes in only with its next game, as well as a
 # single changed name (the same attributes on _Shown and _Record).
@@ -230,6 +270,9 @@ class _Record:
         # The content of the last line handed to the writer: None until the
         # record is first written.
         self.written = None
+        # The content of the line last told to the hooks as match_decided's
+        # candidate: None while no candidate stands.
+        self.candidate = None
 
     def Name(self, side):
         return self.p1 if side == 1 else self.p2
@@ -312,10 +355,16 @@ class _Record:
 class MatchLogService:
     instance = None
 
-    def __init__(self, directory=None, clock=None):
+    def __init__(self, directory=None, clock=None, hooks=None):
+        """`hooks`: the hooks' dispatcher told of match_decided (a
+        PluginHooks: its Wanted / MatchCandidate / MatchWithdrawn), or None
+        (nothing told). Its methods are called holding StateManager.lock
+        and must only queue under a leaf lock (see the module
+        docstring)."""
         self.directory = os.path.abspath(directory or MATCH_LOG_DIR)
         # Local time, with its offset (the line's times say it).
         self._clock = clock or (lambda: datetime.now().astimezone())
+        self._hooks = hooks
         self.retryDelays = RETRY_DELAYS
         # The following, under StateManager.lock.
         self._started = False
@@ -414,7 +463,13 @@ class MatchLogService:
             if shown == self._seen:
                 return
             previous, self._seen = self._seen, shown
-            self._Follow(previous, shown, self._clock())
+            closed = None
+            # best_of alone is no change to the record (only match_decided
+            # reads it).
+            if shown._replace(bestOf=previous.bestOf) != previous:
+                closed = self._Follow(previous, shown, self._clock())
+            self._Decide(closed, previous.bestOf)
+            self._Decide(self._record, shown.bestOf)
 
     @staticmethod
     def _Read():
@@ -441,9 +496,13 @@ class MatchLogService:
             c2=_Codename(player(2, "character")),
             score=(_Score(get(f"{board}.team.1.score")),
                    _Score(get(f"{board}.team.2.score"))),
+            bestOf=_Score(get(f"{board}.best_of")),
         )
 
     def _Follow(self, previous, shown, now):
+        """Take a publish into the records. Returns the record it closed
+        when a new one started (written or not), else None."""
+        closed = None
         setChanged = bool(shown.setId) and shown.setId != previous.setId
         record = self._record
         if record is None:
@@ -467,6 +526,7 @@ class MatchLogService:
         else:
             self._Update(record, previous, shown, now)
         self._Save(record, now)
+        return closed
 
     @staticmethod
     def _Begins(record, shown, setChanged):
@@ -536,6 +596,32 @@ class MatchLogService:
         record.written = content
         record.updatedAt = now
         self._Enqueue(record, closed=False)
+
+    def _Decide(self, record, bestOf):
+        """Tell the hooks whether `record` is decided now (match_decided's
+        candidate, its line replaced, or its withdrawal; the module
+        docstring). After the record's line was handed to the writer: what
+        the hooks do changes nothing in the log. Caller holds
+        StateManager.lock."""
+        hooks = self._hooks
+        if hooks is None or record is None or record.id is None:
+            return
+        decided = (bestOf > 0 and bool(record.games)
+                   and max(record.score) >= bestOf // 2 + 1)
+        try:
+            if decided:
+                content = record.Content()
+                if (content != record.candidate
+                        and hooks.Wanted(HookEvent.MATCH_DECIDED)):
+                    hooks.MatchCandidate(record.id, record.Line(closed=False))
+                    record.candidate = content
+            elif record.candidate is not None:
+                record.candidate = None
+                hooks.MatchWithdrawn(record.id)
+        except Exception as error:
+            logger.warning(
+                f"match log: the hooks' dispatcher failed "
+                f"({type(error).__name__})")
 
     def _Close(self, now):
         """Close the open record (its last line), or drop it unwritten: a
