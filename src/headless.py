@@ -166,11 +166,14 @@ class HeadlessShell:
             self.app, "quit", Qt.ConnectionType.QueuedConnection)
 
     def Shutdown(self):
-        """Stop serving, stop the archive worker and the background tasks,
+        """Stop serving, stop the archive worker, the plugin runs and the
+        background tasks,
         close the match log, then let ./out and user_data/state.json
         finish."""
         from .core.ArchiveJobService import ArchiveJobService
         from .core.MatchLogService import MatchLogService
+        from .core.PluginJobs import PluginJobs
+        from .core.PluginRunner import PluginRunner
         from .core.StateManager import StateManager
         from .core.StatePersistence import StatePersistence
         from .core.TaskExecutor import TaskExecutor
@@ -191,6 +194,18 @@ class HeadlessShell:
                 ArchiveJobService.instance.Shutdown(2.0)
             except Exception:
                 logger.error(traceback.format_exc())
+        # The plugin runs (ADR-009 E.2), at the archive's place and short
+        # for the same reason: each run cancelled, ended past the grace
+        # (PluginJobs.Shutdown, its own runs only), then the runner refuses
+        # any launch and ends what is left. Headless starts none (their
+        # routes are SHELL: 403, and no hook runs), so this is quick.
+        try:
+            if PluginJobs.instance is not None:
+                PluginJobs.instance.Shutdown(2.0)
+            if PluginRunner.instance is not None:
+                PluginRunner.instance.Shutdown(0.0)
+        except Exception:
+            logger.error(traceback.format_exc())
         # After the server (no request can queue a task any more), before
         # the flush (a task that finishes in time has its writes in it).
         # Short for the same reason as the server's: queued tasks are

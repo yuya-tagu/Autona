@@ -323,6 +323,49 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/variants', 'api_v1.get_variants', 'GET,HEAD,OPTIONS'),
 ]
 
+# The plugins' v1 routes (ADR-009 D4): src/AutonaPluginApi.py's, added to
+# the v1 blueprint by bootstrap_core() (RegisterPluginRoutes) before either
+# shell's web server registers it -- so not in the blueprint as imported
+# (test_api_v1_route_ledger leaves them out, test_plugin_route_ledger reads
+# them off the same call). One set of routes for every plugin.
+EXPECTED_PLUGIN_ROUTES = [
+    ('/api/v1/plugins', 'api_v1.get_plugins', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/icon', 'api_v1.get_plugin_icon', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>', 'api_v1.get_plugin', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/settings', 'api_v1.plugin_settings_update', 'OPTIONS,PATCH'),
+    ('/api/v1/plugins/<plugin_id>:reload', 'api_v1.plugin_reload', 'OPTIONS,POST'),
+    ('/api/v1/plugins/inputs/<kind>', 'api_v1.get_plugin_input_choices', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/runs', 'api_v1.plugin_run_create', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>/runs', 'api_v1.get_plugin_runs', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/runs/<run_id>', 'api_v1.get_plugin_run', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/runs/<run_id>:cancel', 'api_v1.plugin_run_cancel', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>/runs/<run_id>/log', 'api_v1.get_plugin_run_log', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/runs/<run_id>/artifacts/<no>', 'api_v1.get_plugin_run_artifact', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/runs/<run_id>/artifacts/<no>:reveal', 'api_v1.plugin_run_artifact_reveal', 'OPTIONS,POST'),
+    ('/api/v1/plugins/dev', 'api_v1.get_plugin_dev', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/dev', 'api_v1.plugin_dev_update', 'OPTIONS,PATCH'),
+    ('/api/v1/plugins/dev/folders', 'api_v1.plugin_dev_folder_add', 'OPTIONS,POST'),
+    ('/api/v1/plugins/dev/folders/<folder_id>', 'api_v1.plugin_dev_folder_remove', 'DELETE,OPTIONS'),
+    ('/api/v1/plugins/actions', 'api_v1.get_plugin_actions', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/secrets/<key>', 'api_v1.plugin_secret_update', 'OPTIONS,PUT'),
+    ('/api/v1/plugins/<plugin_id>/secrets/<key>', 'api_v1.plugin_secret_delete', 'DELETE,OPTIONS'),
+    ('/api/v1/plugins/uploads', 'api_v1.plugin_upload_zip', 'OPTIONS,POST'),
+    ('/api/v1/plugins/uploads/<upload_id>', 'api_v1.plugin_upload_drop', 'DELETE,OPTIONS'),
+    ('/api/v1/plugins/installs', 'api_v1.plugin_install_create', 'OPTIONS,POST'),
+    ('/api/v1/plugins/installs/<install_id>', 'api_v1.get_plugin_install', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/installs/<install_id>:consent', 'api_v1.plugin_install_consent', 'OPTIONS,POST'),
+    ('/api/v1/plugins/installs/<install_id>:cancel', 'api_v1.plugin_install_cancel', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>:enable', 'api_v1.plugin_enable', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>:disable', 'api_v1.plugin_disable', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>/removal', 'api_v1.get_plugin_removal', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>:remove', 'api_v1.plugin_remove', 'OPTIONS,POST'),
+    ('/api/v1/plugins/listing', 'api_v1.get_plugin_listing', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins:checkUpdates', 'api_v1.plugin_updates_check', 'OPTIONS,POST'),
+    ('/api/v1/plugins/<plugin_id>/hooks', 'api_v1.get_plugin_hooks', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/plugins/<plugin_id>/hooks/<job_id>/<on>', 'api_v1.plugin_hook_update', 'OPTIONS,PUT'),
+    ('/api/v1/plugins/<plugin_id>/hooks/<job_id>/<on>:sample', 'api_v1.plugin_hook_sample', 'OPTIONS,POST'),
+]
+
 # SocketIO handlers, all on the default namespace "/".
 EXPECTED_EVENTS = [
     'characters',
@@ -568,15 +611,45 @@ def test_api_v1_route_ledger():
 
     app = Flask(__name__)
     app.register_blueprint(api_v1)
+    # The plugins' routes are on it once bootstrap_core() ran in this
+    # process (the session's harness) and not otherwise: left out here,
+    # pinned by test_plugin_route_ledger.
+    plugins = {endpoint for _rule, endpoint, _methods in EXPECTED_PLUGIN_ROUTES}
     routes = sorted(
         (str(r.rule), r.endpoint, ",".join(sorted(r.methods)))
         for r in app.url_map.iter_rules()
-        if r.endpoint.startswith("api_v1.")
+        if r.endpoint.startswith("api_v1.") and r.endpoint not in plugins
     )
     assert routes == sorted(EXPECTED_API_V1_ROUTES), (
         "/api/v1 routes changed.\n"
         f"missing: {sorted(set(EXPECTED_API_V1_ROUTES) - set(routes))}\n"
         f"unexpected: {sorted(set(routes) - set(EXPECTED_API_V1_ROUTES))}")
+
+
+def test_plugin_route_ledger():
+    # The wiring's call (bootstrap_core()) on a v1 blueprint of its own:
+    # the session's api_v1 keeps the parts the harness gave it.
+    from flask import Blueprint, Flask
+
+    from src.AutonaPluginApi import PluginApiDeps, RegisterPluginRoutes
+
+    blueprint = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+    RegisterPluginRoutes(blueprint, PluginApiDeps())
+    app = Flask(__name__)
+    app.register_blueprint(blueprint)
+    routes = sorted(
+        (str(r.rule), r.endpoint, ",".join(sorted(r.methods)))
+        for r in app.url_map.iter_rules()
+        if r.endpoint.startswith("api_v1.")
+    )
+    assert routes == sorted(EXPECTED_PLUGIN_ROUTES), (
+        "/api/v1/plugins routes changed.\n"
+        f"missing: {sorted(set(EXPECTED_PLUGIN_ROUTES) - set(routes))}\n"
+        f"unexpected: {sorted(set(routes) - set(EXPECTED_PLUGIN_ROUTES))}")
+    # No plugin route shares a URL and method with a v1 route of the
+    # blueprint itself.
+    assert not ({(rule, methods) for rule, _e, methods in EXPECTED_PLUGIN_ROUTES}
+                & {(rule, methods) for rule, _e, methods in EXPECTED_API_V1_ROUTES})
 
 
 # ── Access classification (ADR-005 S3a) ──────────────────────────────────
@@ -590,7 +663,8 @@ def test_api_v1_route_ledger():
 
 def _ledger_endpoints():
     return ({endpoint for _rule, endpoint, _methods in EXPECTED_ROUTES}
-            | {endpoint for _rule, endpoint, _methods in EXPECTED_API_V1_ROUTES})
+            | {endpoint for _rule, endpoint, _methods in EXPECTED_API_V1_ROUTES}
+            | {endpoint for _rule, endpoint, _methods in EXPECTED_PLUGIN_ROUTES})
 
 
 def test_every_route_is_classified():
@@ -708,6 +782,16 @@ def test_the_classification_follows_the_rules():
         if endpoint in shell:
             expected = WebAccess.SHELL
         assert access[endpoint] == expected, endpoint
+    # The plugins' (ADR-009 D4): the list and the icon THIS_PC (ids and
+    # enumerations, a checked png), everything else SHELL -- what a third
+    # party wrote, programs run, secrets stored.
+    for _rule, endpoint, _methods in EXPECTED_PLUGIN_ROUTES:
+        expected = (WebAccess.THIS_PC
+                    if endpoint in {"api_v1.get_plugins",
+                                    "api_v1.get_plugin_icon"}
+                    else WebAccess.SHELL)
+        assert access[endpoint] == expected, endpoint
+    assert len(EXPECTED_PLUGIN_ROUTES) == 35
     assert WebAccess.THIS_PC in WebAccess.GUARDED
     assert WebAccess.SHELL in WebAccess.GUARDED
     # No Socket.IO event is the shell's (a connection's grant is not a

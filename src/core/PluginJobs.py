@@ -663,6 +663,9 @@ class PluginJobs:
     - ``randomSuffix()``: the run id's last three characters ([a-z0-9]).
     """
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, *, runner, registry, inputs, settings, secrets,
                  workDir: Callable[[], str], userDataDir: str,
                  hostVersion: str, locale: Callable[[], str],

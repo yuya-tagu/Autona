@@ -14,9 +14,10 @@ Two stages (ADR-005 S3c):
   and its Qt bridge, the domain operations, the Qt-free catalogs, the
   tournament provider, the game loader with its registrations and the
   player DB's refresh after a load (both shells' since ADR-005 S-final
-  SF-6c). Nothing here needs a QGuiApplication: the Qt objects it builds
-  are QtCore ones (QObject), which a QCoreApplication serves. The headless
-  shell (main.py --headless) stops here.
+  SF-6c), and the plugins' parts and v1 routes (ADR-009 E.1). Nothing
+  here needs a QGuiApplication: the Qt objects it builds are QtCore ones
+  (QObject), which a QCoreApplication serves. The headless shell (main.py
+  --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
   hotkeys, the updater, the boards made and held at launch, the shell
   operations, and their registrations, which the web operations run on the
@@ -50,6 +51,14 @@ from loguru import logger
 # analysis pass) is a no-op rather than a duplicate construction.
 _core_bootstrapped = False
 _gui_bootstrapped = False
+
+# The plugins' user_data folder (their settings, secrets and dev.json are
+# below it), against the working directory as the other stores' are.
+USER_DATA_DIR = "./user_data"
+# The plugin routes' parts (AutonaPluginApi.PluginApiDeps), made and
+# registered by bootstrap_core(); the later stages fill what is theirs on
+# it (read per request).
+_plugin_api_deps = None
 
 
 def bootstrap_core():
@@ -518,8 +527,103 @@ def bootstrap_core():
     # load's board operation and save cycle.)
     StateManagerBridge.instance.game_loaded.connect(AutonaPlayerDB.SetupModel)
 
+    # ORDER CONSTRAINT: the plugins (ADR-009 E.1) -- the runner, the
+    # secrets and settings, the registry, the input sources and the runs --
+    # after SettingsManager (./user_data, the work folder archive.work_dir)
+    # and the task executor; before ArchiveJobService below (the built-in
+    # vodsplit is the runner's and the heavy lane's from ADR-009 I2), before
+    # MatchLogService (the hooks' dispatcher goes between the runs and the
+    # match log, which hands it its candidates: I5) and before the web
+    # server that serves their routes (the shells', after this function
+    # returns). None imports Qt; none starts a process or a thread here.
+    # What they read when used -- the match log's flush and open record,
+    # the archive's work folder and last probe, the runs for the list's state, the
+    # server's address, the locale -- is read through callables, so the
+    # match log and ArchiveJobService (made below) and the locale (the
+    # shell's, after this function) are not needed yet. The parts are in
+    # dependency order: settings over secrets, the registry over settings
+    # (its needs_settings) and the runner (a dev plugin's describe), the
+    # runs over all of them.
+    from .core import MatchLogService as matchLog
+    from .core.PluginInputs import PluginInputs
+    from .core.PluginJobs import PluginJobs
+    from .core.PluginRegistry import PluginRegistry
+    from .core.PluginRunner import PluginRunner
+    from .core.PluginSecrets import PluginSecrets
+    from .core.PluginSettings import PluginSettings
+    hostVersion = _program_version() or ""
+    if PluginRunner.instance is None:
+        PluginRunner.instance = PluginRunner()
+    if PluginSecrets.instance is None:
+        PluginSecrets.instance = PluginSecrets(USER_DATA_DIR)
+    if PluginSettings.instance is None:
+        PluginSettings.instance = PluginSettings(
+            USER_DATA_DIR, PluginSecrets.instance, resolvePick=_resolve_pick)
+    if PluginRegistry.instance is None:
+        PluginRegistry.instance = PluginRegistry(
+            str(AutonaDirHelper.current_dir), USER_DATA_DIR, hostVersion,
+            describe=PluginRunner.instance.Describe,
+            isRunning=lambda pluginId: PluginJobs.instance is not None
+                and PluginJobs.instance.Running(pluginId),
+            settingsMissing=PluginSettings.instance.Missing,
+            builtinVersion=_vodsplit_version)
+    if PluginInputs.instance is None:
+        PluginInputs.instance = PluginInputs(
+            outDir="./out", matchLogDir=matchLog.MATCH_LOG_DIR,
+            workDir=_archive_work_dir,
+            publishedState=lambda: StateManager.GetFullState()["state"],
+            flushMatchLog=lambda: matchLog.MatchLogService.instance.Flush(
+                timeout=2.0),
+            openRecordDate=lambda: matchLog.MatchLogService.instance
+                .OpenRecordDate())
+    if PluginJobs.instance is None:
+        PluginJobs.instance = PluginJobs(
+            runner=PluginRunner.instance, registry=PluginRegistry.instance,
+            inputs=PluginInputs.instance, settings=PluginSettings.instance,
+            secrets=PluginSecrets.instance, workDir=_archive_work_dir,
+            userDataDir=USER_DATA_DIR, hostVersion=hostVersion,
+            locale=lambda: AutonaLocaleHelper.programLocale,
+            apiUrl=_plugin_api_url,
+            # The hooks' dispatcher's (I5: PluginHooks.RunEnded for a
+            # hook's run, LaneFreed for the light lane). None yet.
+            onRunEnded=lambda record: None,
+            onLaneFreed=lambda lane: None)
+
+    # The plugins at launch (ADR-009 E.2): every manifest read, nothing
+    # started. The scan is a few stats and the built-in's folder walked once
+    # (measured: 10-30 ms for an installed vodsplit's 212 files, 412 MB),
+    # so it runs here: the list is whole before the web server serves
+    # it. (The sweep of the runs left 'running' follows ArchiveJobService,
+    # below.)
+    PluginRegistry.instance.Scan()
+
+    # ORDER CONSTRAINT: the plugin v1 routes (ADR-009 D4; AutonaPluginApi)
+    # onto the v1 blueprint, after the parts above they read and before
+    # either shell's web server registers that blueprint on its app
+    # (WebServer.__init__, after this function returns): a rule added to a
+    # blueprint already registered never reaches the app. Added from here,
+    # not from AutonaApiV1, which AutonaPluginApi imports. Once: the deps are
+    # read per request, so what a stage adds later is set on them --
+    # bootstrap_gui()'s reveal, the hooks (I5) and the installer (I4); a
+    # part left None answers 503. The access classes (WebAccess.ROUTE_ACCESS:
+    # the list and the icon THIS_PC, the rest SHELL) are WebAccess's; none
+    # is in the API catalogue.
+    global _plugin_api_deps
+    from .AutonaApiV1 import api_v1
+    from .AutonaPluginApi import PluginApiDeps, RegisterPluginRoutes
+    if _plugin_api_deps is None:
+        _plugin_api_deps = PluginApiDeps(
+            registry=PluginRegistry.instance,
+            settings=PluginSettings.instance,
+            secrets=PluginSecrets.instance, inputs=PluginInputs.instance,
+            jobs=PluginJobs.instance, resolvePick=_resolve_pick,
+            workDir=_archive_work_dir)
+    RegisterPluginRoutes(api_v1, _plugin_api_deps)
+
     # ORDER CONSTRAINT: the archive clipper's jobs (ADR-006 A1), after
-    # SettingsManager (its work folder is archive.work_dir) and before the
+    # SettingsManager (its work folder is archive.work_dir) and the plugin
+    # runner above (ADR-009 E.1: its vodsplit becomes the runner's run on
+    # the heavy lane in I2), and before the
     # web server that starts and reads them (the shells', after this
     # function returns); each shell's close stops its worker (Shutdown,
     # before the executor's shutdown). Depends on nothing else and nothing
@@ -529,6 +633,18 @@ def bootstrap_core():
     from .core.ArchiveJobService import ArchiveJobService
     if ArchiveJobService.instance is None:
         ArchiveJobService.instance = ArchiveJobService()
+
+    # The plugin runs a crash left 'running' marked failed, and each
+    # plugin's kept runs pruned (ADR-009 E.2: PluginJobs.Sweep). ORDER
+    # CONSTRAINT: after ArchiveJobService, whose WorkDir names the work
+    # folder the runs are under, and after the registry's scan above (it
+    # asks which plugin is a dev one). A job of the executor, not a step
+    # here: the work folder may be on a sleeping or unplugged drive, and
+    # the launch does not wait for it (the archive's own jobs read it only
+    # when the page asks). A run started before the job runs is this
+    # process's, which the sweep leaves alone.
+    TaskExecutor.instance.submit(PluginJobs.instance.Sweep,
+                                 task_name="plugin runs' sweep")
 
     # ORDER CONSTRAINT: the archive worker's installer (ADR-006 A7), after
     # ArchiveJobService (it reads the installed version from the jobs' last
@@ -684,6 +800,12 @@ def bootstrap_gui():
     AutonaWebOperations.startImageRender = (
         AutonaShellOperations.instance.StartImageRender)
 
+    # The plugin routes' artifact reveal (ADR-009 D4), the desktop's: set on
+    # the deps bootstrap_core() registered the routes with (read per
+    # request), before the web server exists (Window._StartWebServer). The
+    # headless shell leaves it None: its SHELL routes answer 403 anyway.
+    _plugin_api_deps.revealFile = _reveal_plugin_file
+
     logger.debug("bootstrap_gui complete")
 
 
@@ -741,6 +863,57 @@ def _program_version():
             return json.load(f).get("program")
     except (OSError, ValueError):
         return None
+
+
+def _resolve_pick(fieldType, pickId):
+    """The plugins' pick ids (the shell's pickFile / pickFolder answers) ->
+    the absolute path, None when unknown: PluginSettings' and the plugin
+    routes' resolvePick, both given this one function. Always None until the
+    shell keeps what it picked -- a file / folder value is then refused as
+    not picked. ADR-009 L10's wiring replaces this body with its keeper's
+    lookup."""
+    return None
+
+
+def _archive_work_dir():
+    """The work folder now (ArchiveJobService.WorkDir: archive.work_dir,
+    else the default), read at each use: the plugin runs' folders are below
+    it (ADR-009 A.8). Called only once bootstrap_core() has made the
+    archive's jobs."""
+    from .core.ArchiveJobService import ArchiveJobService
+    return ArchiveJobService.instance.WorkDir()
+
+
+def _vodsplit_version():
+    """The built-in vodsplit's version, as the archive page last probed it
+    ("" before a probe): the plugin list's row (PluginRegistry)."""
+    from .core.ArchiveJobService import ArchiveJobService
+    jobs = ArchiveJobService.instance
+    probe = jobs.CachedProbe() if jobs is not None else None
+    return (probe.version or "") if probe is not None else ""
+
+
+def _plugin_api_url():
+    """The v1 base URL a plugin declaring autona_api read / write is given
+    (AUTONA_API_URL, ADR-009 A.7): this PC's loopback at the port the server
+    is reached at (WebServer.Serving, the one reader)."""
+    from .AutonaWebServer import WebServer
+    port, _lan = WebServer.Serving()
+    return f"http://127.0.0.1:{port}/api/v1"
+
+
+def _reveal_plugin_file(path):
+    """A plugin artifact's "show in Explorer" (the plugin routes'
+    revealFile): the file selected in its folder, as LayoutCatalog shows
+    its own (quoted for Explorer, no shell); False when it was not shown.
+    The desktop's alone (bootstrap_gui())."""
+    import os
+
+    from .core import LayoutCatalog
+    try:
+        return LayoutCatalog._Reveal(path, os.path.dirname(path), True)
+    except OSError:
+        return False
 
 
 def make_game_loader(catalog, afterScan=None):

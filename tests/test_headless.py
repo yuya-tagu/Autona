@@ -570,11 +570,30 @@ class _FakeMatchLog:
         return True
 
 
+class _FakePluginPart:
+    """PluginJobs.instance / PluginRunner.instance, recording their close
+    (the session's real ones must stay open for the tests after this
+    one)."""
+
+    def __init__(self, order, name):
+        self.order = order
+        self.name = name
+
+    def Shutdown(self, grace):
+        self.order.append((self.name, grace))
+
+
 def _record_the_flush(monkeypatch, order):
     from src.core.MatchLogService import MatchLogService
+    from src.core.PluginJobs import PluginJobs
+    from src.core.PluginRunner import PluginRunner
     from src.core.StateManager import StateManager
     from src.core.StatePersistence import StatePersistence
     monkeypatch.setattr(MatchLogService, "instance", _FakeMatchLog(order))
+    monkeypatch.setattr(PluginJobs, "instance",
+                        _FakePluginPart(order, "plugin runs"))
+    monkeypatch.setattr(PluginRunner, "instance",
+                        _FakePluginPart(order, "plugin runner"))
     monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
         lambda timeout=None: order.append("out") or True))
     monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
@@ -602,8 +621,11 @@ def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
     # The background tasks after the server (no request can queue one any
     # more) and before the flush (ADR-005 S3f-1), with a short wait: a
     # console close leaves about five seconds in all. The match log after
-    # both, which can still publish a change it records (ADR-006 A2).
-    assert order == ["server", ("tasks", 1.0), ("match log", 1.0), "out",
+    # both, which can still publish a change it records (ADR-006 A2). The
+    # plugin runs after the server and before the tasks, their runner
+    # last of them (ADR-009 E.2).
+    assert order == ["server", ("plugin runs", 2.0), ("plugin runner", 0.0),
+                     ("tasks", 1.0), ("match log", 1.0), "out",
                      "state.json", ("handler removed", False)]
     assert shell.stopped.is_set()
     assert shell._removeConsoleHandler is None
@@ -620,7 +642,8 @@ def test_a_shutdown_before_the_web_server_was_made_still_writes(monkeypatch):
     shell = headless.HeadlessShell(app=None)
     shell.Shutdown()
 
-    assert order == [("tasks", 1.0), ("match log", 1.0), "out", "state.json"]
+    assert order == [("plugin runs", 2.0), ("plugin runner", 0.0),
+                     ("tasks", 1.0), ("match log", 1.0), "out", "state.json"]
     assert shell.stopped.is_set()
 
 

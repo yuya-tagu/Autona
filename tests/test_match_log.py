@@ -219,6 +219,23 @@ def test_a_match_typed_by_hand_is_one_record(board, log):
         {"c1": "mario", "c2": "peach", "at": third}]
 
 
+def test_the_open_record_s_date_is_the_day_it_started(board, log):
+    # A plugin's match_log input at its trigger is the file of this date
+    # (PluginInputs, ADR-009 B.5): the record's start, past midnight too.
+    assert log.service.OpenRecordDate() is None
+    _match()
+    log.clock.tick()
+    _game(1)
+    assert log.service.OpenRecordDate() == log.clock.now.date()
+    started = log.clock.now.date()
+    log.clock.tick(6 * 3600)
+    _game(2)
+    assert log.clock.now.date() != started
+    assert log.service.OpenRecordDate() == started
+    _reset()
+    assert log.service.OpenRecordDate() is None
+
+
 def test_the_next_match_typed_one_name_at_a_time(board, log):
     _match()
     _game(1)

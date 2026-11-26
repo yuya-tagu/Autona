@@ -325,6 +325,9 @@ class PluginRegistry:
     - ``which(name) -> Optional[str]``: a dev entry's PATH lookup.
     """
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, appDir: str, userDataDir: str, hostVersion: str, *,
                  describe: Optional[Callable[..., DescribeRun]] = None,
                  installSource: Optional[Callable[[str], Optional[InstallSource]]] = None,

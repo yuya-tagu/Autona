@@ -144,6 +144,9 @@ class PluginSecrets:
     """``userDataDir``: the user_data folder (made absolute now).
     ``protect`` / ``unprotect``: the cipher (DPAPI by default)."""
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, userDataDir: str,
                  protect: Optional[Callable[[bytes], bytes]] = None,
                  unprotect: Optional[Callable[[bytes], bytes]] = None):

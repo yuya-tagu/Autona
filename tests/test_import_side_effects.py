@@ -201,6 +201,14 @@ match_log_service = importlib.import_module(
 # The plugin contract's types (ADR-009 W0): dataclasses, enums and
 # Protocols only -- nothing made, read or started on import.
 importlib.import_module("src.core.PluginTypes")
+# The plugin parts (ADR-009 E.1): singletons created by bootstrap_core();
+# no manifest read, no folder made, no process or thread started on
+# import. The plugin routes (AutonaPluginApi) are added to the v1 blueprint
+# by bootstrap_core(), never on import.
+plugin_parts = [importlib.import_module(f"src.core.{name}") for name in (
+    "PluginRunner", "PluginSecrets", "PluginSettings", "PluginRegistry",
+    "PluginInputs", "PluginJobs")]
+plugin_api = importlib.import_module("src.AutonaPluginApi")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -366,6 +374,13 @@ assert archive_worker_installer.instance is None, \
     "import created ArchiveWorkerInstaller.instance"
 assert match_log_service.instance is None, \
     "import created MatchLogService.instance"
+for module in plugin_parts:
+    name = module.__name__.rsplit(".", 1)[1]
+    assert getattr(module, name).instance is None, \
+        f"import created {name}.instance"
+assert getattr(importlib.import_module("src.AutonaApiV1").api_v1,
+               plugin_api._BOUND_ATTRIBUTE, None) is None, \
+    "import added the plugin routes to the v1 blueprint"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

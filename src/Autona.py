@@ -814,6 +814,25 @@ class Window(QMainWindow):
             logger.opt(exception=True).error(
                 "Error stopping the archive worker on shutdown")
 
+        # The plugin runs (ADR-009 E.2), at the archive's place: after the
+        # web server (no request can start one any more) and before the
+        # tasks. Each run is cancelled and, past the 5 seconds' grace, its
+        # job object ended (PluginJobs.Shutdown: its own runs only). Then the
+        # runner refuses any launch and ends what is left -- a dev plugin's
+        # describe on a request thread the server's stop does not drain;
+        # the runs are already their owners' to have stopped (the archive's
+        # above, PluginJobs').
+        try:
+            from .core.PluginJobs import PluginJobs
+            from .core.PluginRunner import PluginRunner
+            if PluginJobs.instance is not None:
+                PluginJobs.instance.Shutdown(5.0)
+            if PluginRunner.instance is not None:
+                PluginRunner.instance.Shutdown(0.0)
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error stopping the plugin runs on shutdown")
+
         # The background tasks (ADR-005 S3f): after the web server, so no
         # request can queue one any more; before the interpreter's exit join
         # flushes ./out and user_data/state.json, so a task that finishes in

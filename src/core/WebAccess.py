@@ -415,6 +415,51 @@ ROUTE_ACCESS = {
     "api_v1.get_archive_worker": THIS_PC,
     "api_v1.archive_worker_install": SHELL,
     "api_v1.archive_worker_cancel": SHELL,
+    # The plugins (ADR-009 D4; src/AutonaPluginApi.py, registered onto the
+    # v1 blueprint by bootstrap_core()). The list (ids and enumerations
+    # only: no reason, error, path or history) and a plugin's icon (a
+    # checked png) are THIS_PC, so a plain browser and the headless shell
+    # can see what is installed. Everything else is SHELL, stricter than
+    # the archive's reads: a plugin's details, settings and secrets, its
+    # runs, their logs and artifacts and its hooks carry what a third party
+    # wrote (players' names, paths, errors), and the writes run programs,
+    # store secrets and change this PC's plugins. Headless and a plain
+    # browser get 403; the desktop's shared view reaches them.
+    "api_v1.get_plugins": THIS_PC,
+    "api_v1.get_plugin_icon": THIS_PC,
+    "api_v1.get_plugin": SHELL,
+    "api_v1.plugin_settings_update": SHELL,
+    "api_v1.plugin_reload": SHELL,
+    "api_v1.get_plugin_input_choices": SHELL,
+    "api_v1.plugin_run_create": SHELL,
+    "api_v1.get_plugin_runs": SHELL,
+    "api_v1.get_plugin_run": SHELL,
+    "api_v1.plugin_run_cancel": SHELL,
+    "api_v1.get_plugin_run_log": SHELL,
+    "api_v1.get_plugin_run_artifact": SHELL,
+    "api_v1.plugin_run_artifact_reveal": SHELL,
+    "api_v1.get_plugin_dev": SHELL,
+    "api_v1.plugin_dev_update": SHELL,
+    "api_v1.plugin_dev_folder_add": SHELL,
+    "api_v1.plugin_dev_folder_remove": SHELL,
+    "api_v1.get_plugin_actions": SHELL,
+    "api_v1.plugin_secret_update": SHELL,
+    "api_v1.plugin_secret_delete": SHELL,
+    "api_v1.plugin_upload_zip": SHELL,
+    "api_v1.plugin_upload_drop": SHELL,
+    "api_v1.plugin_install_create": SHELL,
+    "api_v1.get_plugin_install": SHELL,
+    "api_v1.plugin_install_consent": SHELL,
+    "api_v1.plugin_install_cancel": SHELL,
+    "api_v1.plugin_enable": SHELL,
+    "api_v1.plugin_disable": SHELL,
+    "api_v1.get_plugin_removal": SHELL,
+    "api_v1.plugin_remove": SHELL,
+    "api_v1.get_plugin_listing": SHELL,
+    "api_v1.plugin_updates_check": SHELL,
+    "api_v1.get_plugin_hooks": SHELL,
+    "api_v1.plugin_hook_update": SHELL,
+    "api_v1.plugin_hook_sample": SHELL,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,

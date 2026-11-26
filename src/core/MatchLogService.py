@@ -468,6 +468,17 @@ class MatchLogService:
             target = self._queued
             return self._cond.wait_for(lambda: self._done >= target, timeout)
 
+    def OpenRecordDate(self):
+        """The local date the open record started on, or None when none is
+        open: a plugin's match_log input at its trigger is that day's file
+        (PluginInputs, ADR-009 B.5). Takes StateManager.lock: not called
+        holding the writer's leaf lock."""
+        with StateManager.lock:
+            record = self._record
+            if record is None or record.startedAt is None:
+                return None
+            return record.startedAt.date()
+
     # ── the observer ─────────────────────────────────────────────────────
 
     def _OnStatePublished(self, *_payload):

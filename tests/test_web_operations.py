@@ -49,7 +49,8 @@ from tests.fixtures import template_packages
 from tests.fixtures.stats.spies import StatsTriggers
 from tests.test_designer_service import make_project
 from tests.test_webserver_routes import (
-    EXPECTED_API_V1_ROUTES, EXPECTED_EVENTS, EXPECTED_ROUTES)
+    EXPECTED_API_V1_ROUTES, EXPECTED_EVENTS, EXPECTED_PLUGIN_ROUTES,
+    EXPECTED_ROUTES)
 
 BOARD = 2   # the team board: every S2 field (team names included) applies
 
@@ -2395,7 +2396,11 @@ _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "kind": "commentary", "feature": "commentary", "index": 99,
                "game": 1, "row": 1, "upload_id": "x" * 22, "asset_id": "x" * 22,
                "job_id": "20261116-000000-zzzz", "no": "1",
-               "template_id": "default"}
+               "template_id": "default",
+               # The plugins' (ADR-009 D4): well-formed ids naming none.
+               "plugin_id": "example.none", "run_id": "20261126-000000-zzzz",
+               "folder_id": "0" * 12, "key": "token",
+               "install_id": "x" * 22, "on": "match_decided"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -2611,6 +2616,13 @@ _NOT_200 = {
     ("api_v1.get_archive_video", None): 404,
     ("api_v1.get_archive_frame", None): 404,
     ("api_v1.get_archive_thumb", None): 404,
+    # The plugins (ADR-009 D4; on the v1 blueprint since bootstrap_core(),
+    # which the session's harness ran): all but the list and the icon are
+    # SHELL, so headless reaches none (403). The list answers (THIS_PC:
+    # the built-in vodsplit), the URL's plugin has no icon.
+    **{(endpoint, None): 403 for _r, endpoint, _m in EXPECTED_PLUGIN_ROUTES
+       if endpoint not in ("api_v1.get_plugins", "api_v1.get_plugin_icon")},
+    ("api_v1.get_plugin_icon", None): 404,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the
@@ -2823,10 +2835,11 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         autonaApp.settle()
 
     # Every route and event of the ledger was walked
-    # (tests/test_webserver_routes.py: the legacy routes and /api/v1's).
+    # (tests/test_webserver_routes.py: the legacy routes and /api/v1's,
+    # the plugins' with them).
     assert {endpoint for endpoint, *_ in answers} == {
         endpoint for _, endpoint, _
-        in EXPECTED_ROUTES + EXPECTED_API_V1_ROUTES}
+        in EXPECTED_ROUTES + EXPECTED_API_V1_ROUTES + EXPECTED_PLUGIN_ROUTES}
     assert set(events) | {"connect"} == set(EXPECTED_EVENTS)
     # The shell operations, and only they, are refused.
     assert [(endpoint, board, method, url, status) for
