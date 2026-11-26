@@ -155,7 +155,7 @@ paths:
 | `AnalysisService` / `SetSelectionService` | `.instance` | 試合一覧 / セット選択の一覧 |
 | `MatchNameCandidates` | `.instance` | match バーの候補（state に入れない） |
 | `StreamService` | `.instance` | 配信設定のすべて |
-| `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2） |
+| `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2）。match_decided の候補と取り消しを配り役へ（ADR-009 付録 D.1） |
 | `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト（テンプレート・レイアウトの一覧は `LayoutCatalog` のテンプレートパッケージ。コードに表を持たない。ADR-007 T1） |
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
