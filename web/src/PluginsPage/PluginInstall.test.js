@@ -192,6 +192,29 @@ describe("enable and remove", () => {
         expect(screen.queryByTestId("plugin-remove-dialog")).toBeNull();
     });
 
+    test("a failed reread keeps the plugin and its removal shown", async () => {
+        const api = createMockPluginsApi();
+        const detail = api.detail.bind(api);
+        let gone = false;
+        api.detail = (id) => (gone ? Promise.reject(new Error("404"))
+                                   : detail(id));
+        show(api);
+        fireEvent.click(await screen.findByTestId("plugin-row-taguyan.webhook"));
+        fireEvent.click(await screen.findByTestId("plugin-remove"));
+        await screen.findByTestId("plugin-remove-sizes");
+        gone = true;
+        // A reread (here: the switch) fails while the dialog is open.
+        fireEvent.click(screen.getByTestId("plugin-enable")
+            .querySelector("input"));
+        await waitFor(() => expect(
+            screen.getByTestId("plugin-remove-dialog")).toBeTruthy());
+        fireEvent.click(screen.getByTestId("plugin-remove-confirm"));
+        await waitFor(() => expect(
+            screen.queryByTestId("plugin-row-taguyan.webhook")).toBeNull(),
+        WAIT);
+        expect(screen.queryByText(i18n.t("plugins_detail_failed"))).toBeNull();
+    });
+
     test("nothing ticked keeps the data and the runs", async () => {
         const api = createMockPluginsApi();
         const remove = jest.spyOn(api, "startRemoval");
