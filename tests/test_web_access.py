@@ -2717,6 +2717,162 @@ def test_a_shell_that_never_issued_the_secret_refuses_them_all(
     assert WebAccess.Token() == token
 
 
+# A redirect of a request that carried the shell's secret (SF-4a): only to
+# this origin's /api/v1/. QtWebEngine sends the next hop with the header
+# before the shared view's interceptor can block it
+# (tests/test_web_panel_host.py), so the server is what keeps it home.
+ASKED = "http://127.0.0.1:5107/api/v1/asked?x=1"
+SHELL_REDIRECTS = [
+    # (the URL asked, Location, why it is refused or None)
+    (ASKED, "/api/v1/landing", None),
+    (ASKED, "landing", None),                          # /api/v1/landing
+    (ASKED, "", None),                                 # the URL asked
+    (ASKED, "?a", None),                               # ... another query
+    (ASKED, "http://127.0.0.1:5107/api/v1/x", None),   # the request's origin
+    (ASKED, "HTTP://127.0.0.1:5107/api/v1/x", None),
+    (ASKED, "/api/v1/%252e%252e/web", None),   # decoded once: still /api/v1/
+    (ASKED, "http://127.0.0.1:5108/api/v1/x", "elsewhere"),   # another port
+    (ASKED, "http://localhost:5107/api/v1/x", "elsewhere"),   # another name
+    (ASKED, "https://127.0.0.1:5107/api/v1/x", "elsewhere"),
+    (ASKED, "//example.com/api/v1/x", "elsewhere"),
+    (ASKED, "http://x@127.0.0.1:5107/api/v1/x", "elsewhere"),
+    (ASKED, "https://example.com/", "elsewhere"),
+    (ASKED, "https:/api/v1/x", "elsewhere"),   # Chromium: https://api/v1/x
+    (ASKED, "http://127.0.0.1:99999/api/v1/x", "elsewhere"),  # no origin
+    (ASKED, "/web/board", "outside_api"),
+    (ASKED, "/api/v1", "outside_api"),
+    (ASKED, "/api/v1/../web/board", "outside_api"),
+    (ASKED, "/api/v1/%2e%2e/web/board", "outside_api"),
+    (ASKED, "/api/v1/.%2E/web/board", "outside_api"),
+    (ASKED, "/api/v1/x%5c..%5cweb", "outside_api"),
+    (ASKED, "\\\\example.com/api/v1/x", "location"),        # Chromium: //
+    (ASKED, "/\\example.com/api/v1/x", "location"),
+    (ASKED, "/api/v1/\tx", "location"),
+    (ASKED, "/api/v1/ü", "location"),
+    # No host after the slashes: urljoin keeps the request's, Chromium reads
+    # "api" as the host.
+    (ASKED, "///api/v1/x", "location"),
+    (ASKED, "http:///api/v1/x", "location"),
+    (ASKED, "//", "location"),
+    # The default port, spelled or not; the host's case.
+    ("http://localhost/api/v1/a", "http://localhost:80/api/v1/x", None),
+    ("http://localhost/api/v1/a", "http://LOCALHOST/api/v1/x", None),
+    ("http://localhost:80/api/v1/a", "http://localhost/api/v1/x", None),
+    ("http://LOCALHOST/api/v1/a", "/api/v1/x", None),
+    ("http://localhost/api/v1/a", "http://localhost:8080/api/v1/x",
+     "elsewhere"),
+    # IPv6: another spelling of the same address is "elsewhere" (the safe
+    # side; NormalizeOrigin does not canonicalize it).
+    ("http://[::1]:5107/api/v1/a", "http://[::1]:5107/api/v1/x", None),
+    ("http://[::1]:5107/api/v1/a", "/api/v1/x", None),
+    ("http://[::1]:5107/api/v1/a", "http://[0:0::1]:5107/api/v1/x",
+     "elsewhere"),
+]
+
+
+@pytest.mark.parametrize("asked, location, because", SHELL_REDIRECTS)
+def test_the_shells_request_is_redirected_only_to_this_origins_api(
+        asked, location, because):
+    for status in (302, 301, 303, 307, 308, 300):
+        assert WebAccess.ShellRedirectRefusal(
+            status, [location], asked) == because, status
+    # Not a redirect: no Location, or not a 3xx.
+    assert WebAccess.ShellRedirectRefusal(200, [location], asked) is None
+    assert WebAccess.ShellRedirectRefusal(302, [], asked) is None
+    assert WebAccess.ShellRedirectRefusal(304, [], asked) is None
+
+
+def test_the_shells_redirect_is_judged_conservatively():
+    # Every 3xx with a Location, 304 too (Chromium does not follow it).
+    away = ["https://example.com/api/v1/x"]
+    for status in (304, 305, 306):
+        assert WebAccess.ShellRedirectRefusal(status, away, ASKED) == (
+            "elsewhere")
+    # More than one Location: which one a client takes is not ours to tell.
+    assert WebAccess.ShellRedirectRefusal(
+        302, ["/api/v1/x", "/api/v1/y"], ASKED) == "location"
+
+
+def _redirecting(server):
+    """The app with a route that redirects to its ?to= (the test client
+    addresses it as http://localhost, port 80), and one that werkzeug
+    redirects to its trailing slash."""
+    from flask import redirect, request
+
+    server.app.add_url_rule(
+        "/api/v1/redirecting", "redirecting",
+        lambda: redirect(request.args["to"], 302))
+    server.app.add_url_rule("/api/v1/slashed/", "slashed", lambda: "slashed")
+    return _client(server)
+
+
+@pytest.mark.parametrize("to", [
+    "http://127.0.0.1:9/api/v1/landing",   # another listener of this PC
+    "http://localhost:81/api/v1/landing",
+    "https://example.com/api/v1/landing",
+    "//example.com/api/v1/landing",
+    "/web/board",                          # this origin, not /api/v1/
+])
+def test_a_redirect_away_of_the_shells_request_is_not_sent(server, warnings,
+                                                            to):
+    client = _redirecting(server)
+    secret = WebAccess.IssueShellSecret()
+    url = "/api/v1/redirecting?to=" + to
+    for value in (secret, "x"):   # whatever the header holds
+        response = client.get(url, headers={WebAccess.SHELL_HEADER: value})
+        assert response.status_code == 500
+        assert response.get_json() == WebAccess.ErrorBody(
+            WebAccess.SHELL_REDIRECT)
+        assert "Location" not in response.headers
+        assert response.headers["Cache-Control"] == "no-store"
+        assert WebAccess.FRAME_ANCESTORS in response.headers.getlist(
+            "Content-Security-Policy")
+    # Without the header the route's redirect goes as it was.
+    response = client.get(url)
+    assert response.status_code == 302
+    assert response.headers["Location"] == to
+    # Logged once, with the path and why: never the Location or the secret.
+    logged = [m for m in warnings if "shell_redirect" in m]
+    assert len(logged) == 1
+    assert "/api/v1/redirecting" in logged[0]
+    assert to not in logged[0] and "example.com" not in logged[0]
+    assert secret not in logged[0]
+
+
+def test_a_redirect_of_the_shells_request_to_this_origins_api_is_sent(server):
+    client = _redirecting(server)
+    headers = {WebAccess.SHELL_HEADER: WebAccess.IssueShellSecret()}
+    response = client.get("/api/v1/redirecting?to=/api/v1/landing",
+                          headers=headers)
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/api/v1/landing"
+    # werkzeug's own: the trailing slash, to this origin's /api/v1/.
+    response = client.get("/api/v1/slashed", headers=headers)
+    assert response.status_code == 308
+    assert WebAccess.ShellRedirectRefusal(
+        308, response.headers.getlist("Location"),
+        "http://localhost/api/v1/slashed") is None
+
+
+def test_a_redirect_of_the_shells_request_with_two_locations_is_not_sent(
+        server):
+    # The server reads every Location, not the first one only.
+    from flask import Response
+
+    def twice():
+        response = Response(status=302)
+        response.headers.add("Location", "/api/v1/landing")
+        response.headers.add("Location", "https://example.com/api/v1/x")
+        return response
+
+    server.app.add_url_rule("/api/v1/twice", "twice", twice)
+    response = _client(server).get(
+        "/api/v1/twice",
+        headers={WebAccess.SHELL_HEADER: WebAccess.IssueShellSecret()})
+    assert response.status_code == 500
+    assert "Location" not in response.headers
+
+
 # The game asset routes (SF-4b-1): the same rule. (method, URL, body, the
 # operation it reaches, the status it answers the shell.)
 ASSET_SHELL_ROUTES = [

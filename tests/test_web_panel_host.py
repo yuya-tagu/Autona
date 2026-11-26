@@ -203,7 +203,9 @@ def _relayed(handler, body=b""):
 
 
 # What the panel server redirects (SF-4a: the header goes along with a
-# redirect, so the shell blocks a hop away from /api/v1/).
+# redirect, so the shell blocks a hop away from /api/v1/). A stand-in: the
+# real server sends no redirect away to a request that carries the header
+# (core.WebAccess.ShellRedirectRefusal, tests/test_web_access.py).
 REDIRECT_AWAY = "/api/v1/redirect-away?to="
 REDIRECT_HERE = "/api/v1/redirect-here"
 
@@ -1062,7 +1064,9 @@ def test_a_preview_frame_is_refused_the_clipboard(buildHost, frameServer,
 # frame is the Web UI there; not to its pictures, scripts or navigations, not
 # to a design preview's fetch, not to a fetch of another origin's, never in
 # another view on the same profile (the Designer's); and blocks a request
-# that carries it anywhere else (a redirect away).
+# that carries it anywhere else (a redirect away) -- which keeps the answer
+# from the page, not the hop from its server: the real server never sends
+# such a redirect (core.WebAccess.ShellRedirectRefusal).
 
 def _seen(path, server="panel"):
     """The shell's header of each request of `path` the server took."""
@@ -1399,14 +1403,19 @@ def test_the_shared_views_xhr_uploads_a_zip_as_its_bytes(buildHost,
         (tmp_path / "user_data" / ".autona-uploads").iterdir())) == 1
 
 
-def test_a_redirect_away_does_not_carry_the_secret(buildHost, frameServer,
-                                                   caplog):
+def test_a_redirect_away_is_blocked_and_the_next_hop_here_carries_the_secret_again(
+        buildHost, frameServer, caplog):
     # Measured on PySide6 6.11: a header the interceptor added follows a
     # redirect, to another origin as well. A hop that is not one to carry it
     # is blocked; one that is (this server's /api/v1/) carries it again.
+    # The block keeps the answer from the page, not the hop from the other
+    # server: QtWebEngine sends the hop -- the header with it -- before the
+    # interceptor sees it, so whether the frame server took it is a race
+    # (with the interceptor held up, it always does). Not asserted either
+    # way: the real server never sends this redirect
+    # (core.WebAccess.ShellRedirectRefusal, tests/test_web_access.py).
     rig = _shown(buildHost)
-    framePort, frameRequests = frameServer
-    frameRequests.clear()
+    framePort, _ = frameServer
     away = f"http://127.0.0.1:{framePort}/api/v1/landing-away"
     with caplog.at_level(logging.WARNING, logger=HostModule.__name__):
         rig.js("window.__failed = null,"
@@ -1422,8 +1431,6 @@ def test_a_redirect_away_does_not_carry_the_secret(buildHost, frameServer,
     assert _seen(REDIRECT_AWAY + quote(away, safe="")) == [secret]
     assert _seen(REDIRECT_HERE) == [secret]
     assert _seen("/api/v1/landing-here") == [secret]
-    _waitUntil(lambda: False, timeout=0.5)
-    assert "/api/v1/landing-away" not in frameRequests
     assert secret not in caplog.text
 
 
