@@ -4,6 +4,7 @@ Driven without its thread: a fake clock, a fake registry and a fake start
 (PluginJobs.Start), and ``Pump()`` for one round of the dispatcher. One test
 runs the real thread.
 """
+import dataclasses
 import json
 import os
 import threading
@@ -15,7 +16,7 @@ import pytest
 from src.core import PluginHooks as hooks_module
 from src.core.PluginHooks import PluginHooks
 from src.core.PluginTypes import (
-    HOOK_HISTORY_PER_HOOK, Badge, ErrorEvent, EndReason, Field, Hook,
+    HOOK_HISTORY_PER_HOOK, HOOK_RATE_WINDOW_MAX_STARTS, Badge, ErrorEvent, EndReason, Field, Hook,
     HookDisabledReason, HookEvent, HookOutcome, Job, JobState, Lane,
     Manifest, ManifestReport, Option, Permissions, PluginState,
     RegisteredPlugin, Refused, RunRecord, StartRefusal, TriggerKind)
@@ -499,11 +500,11 @@ def test_a_dev_plugin_keeps_its_hooks_apart(setup):
 def test_enabling_checks_the_values(setup):
     registry, jobs, clock, make, _ = setup
     dispatcher = make()
-    for values, detail in [({"nope": 1}, "unknown key nope"),
-                           ({"message": "x" * 11}, "message does not fit"),
-                           ({"count": 1.5}, "count does not fit"),
-                           ({"count": 9}, "count does not fit"),
-                           ({"count": True}, "count does not fit")]:
+    for values, detail in [({"nope": 1}, "nope: no such value"),
+                           ({"message": "x" * 11}, "message: too long"),
+                           ({"count": 1.5}, "count: not on step"),
+                           ({"count": 9}, "count: above max"),
+                           ({"count": True}, "count: not a number")]:
         refused = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, values)
         assert refused == Refused(StartRefusal.INVALID_REQUEST,
                                   detail=detail)
@@ -681,3 +682,442 @@ def test_the_dispatcher_thread_starts_a_trigger_and_stops(setup):
         dispatcher.Shutdown()
     assert not dispatcher._thread.is_alive()
     assert os.path.basename(jobs.calls[0][5]["image"].path) == "a.png"
+
+
+# ── hooks.json that cannot be taken in (review M1 / S4) ─────────────────
+
+def _hooks_file(tmp_path, dev=False):
+    root = tmp_path / "user_data" / "plugins"
+    return (root / "_dev" if dev else root) / PLUGIN / "hooks.json"
+
+
+@pytest.mark.parametrize("content", ["[]", '{"hooks": []}', "not json {"])
+def test_a_damaged_hooks_json_is_moved_aside(setup, content):
+    registry, jobs, clock, make, tmp_path = setup
+    path = _hooks_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(content, encoding="utf-8")
+    dispatcher = make()
+    dispatcher.Start()
+    try:
+        assert not any(s.enabled for s in dispatcher.Status(PLUGIN))
+        [backup] = path.parent.glob("hooks.json.unreadable-*.bak")
+        assert backup.read_text(encoding="utf-8") == content
+        assert not path.exists()
+        assert not isinstance(
+            dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {}), Refused)
+        assert IMAGE_KEY in json.loads(path.read_text(encoding="utf-8"))[
+            "hooks"]
+    finally:
+        dispatcher.Shutdown()
+
+
+def test_a_hook_entry_of_another_shape_is_left_out_alone(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    path = _hooks_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"hooks": {
+        IMAGE_KEY: {"enabled": True, "params": {"message": "hi"},
+                    "history": 5, "failures": "x", "last_error": 3},
+        MATCH_KEY: 7}}), encoding="utf-8")
+    dispatcher = make()
+    dispatcher.Refresh()
+    image = _status(dispatcher, IMAGE_KEY)
+    assert image.enabled and image.history == () and image.failures == 0
+    assert not _status(dispatcher, MATCH_KEY).enabled
+    assert dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+    assert not list(path.parent.glob("*.bak"))
+
+
+def test_a_hooks_json_that_cannot_be_opened_is_not_written_over(
+        setup, monkeypatch):
+    registry, jobs, clock, make, tmp_path = setup
+    _enabled(make, IMAGE_KEY, MATCH_KEY)
+    path = _hooks_file(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    realOpen = open
+
+    def locked(file, *args, **kwargs):
+        if str(file) == str(path):
+            raise PermissionError("held by another process")
+        return realOpen(file, *args, **kwargs)
+
+    monkeypatch.setattr(hooks_module, "open", locked, raising=False)
+    dispatcher = make()
+    dispatcher.Refresh()
+    assert not dispatcher.Wanted(HookEvent.MATCH_DECIDED)
+    refused = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, False, {})
+    assert refused == Refused(StartRefusal.UNAVAILABLE,
+                              detail="hooks.json unreadable")
+    assert path.read_text(encoding="utf-8") == before
+    assert not list(path.parent.glob("*.bak"))
+    # Readable again: read on the next access, nothing lost.
+    monkeypatch.undo()
+    assert _status(dispatcher, MATCH_KEY).enabled
+    assert dispatcher.Wanted(HookEvent.MATCH_DECIDED)
+
+
+def test_a_read_again_that_fails_keeps_memory(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = _enabled(make, IMAGE_KEY,
+                          **{IMAGE_KEY: {"message": "hi"}})
+    path = _hooks_file(tmp_path)
+    path.write_text("not json {", encoding="utf-8")
+    dispatcher.Refresh()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.enabled and status.params["message"] == "hi"
+    assert dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+    assert not list(path.parent.glob("*.bak"))
+    # The next save writes what memory has.
+    dispatcher.SetEnabled(PLUGIN, MATCH_KEY, True, {})
+    saved = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+    assert saved[IMAGE_KEY]["params"]["message"] == "hi"
+    assert saved[MATCH_KEY]["enabled"] is True
+
+
+def test_a_failed_write_keeps_memory_and_the_next_one_saves(
+        setup, monkeypatch):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = make()
+
+    def full(path, data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(hooks_module.ImageImport, "WriteFile", full)
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {})
+    assert status.enabled
+    assert dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+    path = _hooks_file(tmp_path)
+    assert not path.exists()
+    monkeypatch.undo()
+    dispatcher.SetEnabled(PLUGIN, MATCH_KEY, True, {})
+    saved = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+    assert saved[IMAGE_KEY]["enabled"] and saved[MATCH_KEY]["enabled"]
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_hooks_json_holds_no_setting(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    _run_once(dispatcher, clock, 0)
+    assert jobs.calls[0][4] == {"mention": "none"}
+    text = _hooks_file(tmp_path).read_text(encoding="utf-8")
+    assert "mention" not in text
+
+
+def test_a_plugin_moved_between_dev_and_installed_shares_nothing(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    registry.add(badge=Badge.DEV)
+    dispatcher = _enabled(make, IMAGE_KEY)
+    jobs.busy = True
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    registry.add(badge=Badge.MANUAL)
+    status = _status(dispatcher, IMAGE_KEY)
+    assert not status.enabled and not status.pending
+    assert not dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+    dispatcher.SetEnabled(PLUGIN, MATCH_KEY, True, {})
+    assert _hooks_file(tmp_path).is_file()
+    dev = json.loads(_hooks_file(tmp_path, dev=True).read_text(
+        encoding="utf-8"))["hooks"]
+    assert MATCH_KEY not in dev
+
+
+# ── shutdown during a dispatch (review M2) ──────────────────────────────
+
+def test_shutdown_during_a_dispatch_keeps_its_timeout_and_no_start_follows(
+        setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    took = []
+
+    def busyThenClose():
+        # The close comes while the dispatcher holds its state lock.
+        began = time.monotonic()
+        dispatcher.Shutdown(timeout=0.05)
+        took.append(time.monotonic() - began)
+        return False
+
+    dispatcher._busy = busyThenClose
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    assert jobs.calls == []
+    assert took and took[0] < 1.0
+
+
+def test_a_sample_started_as_the_close_comes_is_not_started(setup):
+    registry, jobs, clock, make, _ = setup
+    registry.add(badge=Badge.DEV)
+    dispatcher = make(samplesDir=str(SAMPLES))
+
+    def settingsThenClose(pluginId):
+        dispatcher.Shutdown(timeout=0.05)
+        return {}
+
+    dispatcher._settings = settingsThenClose
+    assert dispatcher.TrySample(PLUGIN, MATCH_KEY).reason == (
+        StartRefusal.UNAVAILABLE)
+    assert jobs.calls == []
+
+
+# ── one trigger at a time (review S1 / S6, N6, N7) ──────────────────────
+
+def test_two_triggers_together_on_a_free_lane_lose_neither(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    realStart = jobs.start
+
+    def fillsTheLane(*args):
+        record = realStart(*args)
+        jobs.busy = True
+        return record
+
+    dispatcher._start = fillsTheLane
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.ResultImageSaved("C:\\out\\results\\b.png")
+    dispatcher.Pump()
+    [call] = jobs.calls
+    assert call[5]["image"].path == "C:\\out\\results\\a.png"
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.pending and status.history == ()
+    jobs.busy = False
+    dispatcher.LaneFreed()
+    dispatcher.Pump()
+    assert jobs.calls[1][5]["image"].path == "C:\\out\\results\\b.png"
+
+
+def test_one_failing_item_does_not_lose_the_others(setup, monkeypatch):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY, MATCH_KEY)
+    realTrigger = dispatcher._Trigger
+
+    def broken(event, at, **kwargs):
+        if event == HookEvent.RESULT_IMAGE_SAVED:
+            raise RuntimeError("broken")
+        return realTrigger(event, at, **kwargs)
+
+    monkeypatch.setattr(dispatcher, "_Trigger", broken)
+    dispatcher.MatchCandidate("rec-1", _line([3, 1]))
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.MatchWithdrawn("rec-1")
+    dispatcher.Pump()
+    clock.t += 10
+    dispatcher.Pump()
+    # The withdrawal after the failing item was taken: nothing fired.
+    assert jobs.calls == []
+
+
+def test_a_start_that_raises_drops_that_trigger_only(setup):
+    registry, jobs, clock, make, _ = setup
+    registry.add("example.other")
+    dispatcher = _enabled(make, IMAGE_KEY)
+    dispatcher.SetEnabled("example.other", IMAGE_KEY, True, {})
+    realStart = jobs.start
+
+    def raisesForOne(pluginId, *args):
+        if pluginId == PLUGIN:
+            raise RuntimeError("broken start")
+        return realStart(pluginId, *args)
+
+    dispatcher._start = raisesForOne
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    assert [call[0] for call in jobs.calls] == ["example.other"]
+    status = _status(dispatcher, IMAGE_KEY)
+    assert not status.pending and status.enabled
+    assert status.history[0].reason == "start_failed"
+
+
+def test_a_candidate_waits_from_when_it_was_queued(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, MATCH_KEY)
+    dispatcher.MatchCandidate("rec-1", _line([3, 1]))
+    # The dispatcher takes it 3 s late: the 5 s count from the queueing.
+    clock.t += 3
+    dispatcher.Pump()
+    clock.t += 2
+    dispatcher.Pump()
+    assert len(jobs.calls) == 1
+
+
+def test_the_fired_marks_kept_are_bounded(setup, monkeypatch):
+    registry, jobs, clock, make, _ = setup
+    monkeypatch.setattr(hooks_module, "FIRED_KEPT", 2)
+    dispatcher = _enabled(make, MATCH_KEY)
+    for n in range(3):
+        dispatcher.MatchCandidate(f"rec-{n}", _line([3, n]))
+        dispatcher.Pump()
+        clock.t += 5
+        dispatcher.Pump()
+        clock.t += 10
+    assert list(dispatcher._fired) == ["rec-1", "rec-2"]
+
+
+# ── re-enabling, last error, saved values (review S2 / S3 / S5, N10) ────
+
+def test_enabling_again_after_the_rate_limit_empties_the_windows(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    for n in range(61):
+        dispatcher.ResultImageSaved(f"C:\\out\\results\\{n}.png")
+        dispatcher.Pump()
+        clock.t += 11
+    assert not _status(dispatcher, IMAGE_KEY).enabled
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {})
+    for n in range(6):
+        dispatcher.ResultImageSaved(f"C:\\out\\results\\again{n}.png")
+        dispatcher.Pump()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.enabled and len(jobs.calls) == 67
+
+
+def test_a_failed_run_leaves_a_last_error_from_its_reason(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    for n in range(5):
+        dispatcher.RunEnded(PLUGIN, IMAGE_KEY, _record(
+            f"r{n}", JobState.FAILED, reason=EndReason.TIMED_OUT))
+    dispatcher.Pump()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.disabled_reason == HookDisabledReason.FAILURES
+    assert status.last_error.code == "timed_out"
+    assert status.last_error.message["en"] == "Timed out"
+
+
+def test_a_run_failed_because_autona_exited_counts_nothing(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    for n in range(6):
+        dispatcher.RunEnded(PLUGIN, IMAGE_KEY, _record(
+            f"r{n}", JobState.FAILED, reason=EndReason.AUTONA_EXITED))
+    dispatcher.Pump()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.enabled and status.failures == 0
+    assert status.last_error is None
+    assert status.history[0].reason == "autona_exited"
+
+
+def test_saved_values_that_no_longer_fit_disable_the_hook(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    path = _hooks_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"hooks": {MATCH_KEY: {
+        "enabled": True, "params": {"style": "long"}}}}), encoding="utf-8")
+    dispatcher = make()
+    dispatcher.Refresh()
+    dispatcher.MatchCandidate("rec-1", _line([3, 1]))
+    dispatcher.Pump()
+    clock.t += 5
+    dispatcher.Pump()
+    assert jobs.calls == []
+    status = _status(dispatcher, MATCH_KEY)
+    assert not status.enabled
+    assert status.disabled_reason == HookDisabledReason.RECONSENT
+    assert status.history[0].reason == "invalid_params"
+    assert not dispatcher.Wanted(HookEvent.MATCH_DECIDED)
+
+
+def test_a_start_refused_invalid_disables_the_hook(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    jobs.refuse = StartRefusal.INVALID_REQUEST
+    _run_once(dispatcher, clock, 0)
+    status = _status(dispatcher, IMAGE_KEY)
+    assert not status.enabled and status.failures == 0
+    assert status.disabled_reason == HookDisabledReason.RECONSENT
+
+
+def test_a_file_value_is_a_pick_id(setup, tmp_path):
+    registry, jobs, clock, make, _ = setup
+    picked = tmp_path / "logo.png"
+    picked.write_bytes(b"png")
+    plugin = registry.plugins[PLUGIN]
+    manifest = plugin.report.manifest
+    image = manifest.jobs[1]
+    image = dataclasses.replace(image, params=image.params + (
+        Field(key="logo", type="file", label="Logo", extensions=("png",)),))
+    registry.plugins[PLUGIN] = dataclasses.replace(
+        plugin, report=ManifestReport(dataclasses.replace(
+            manifest, jobs=(manifest.jobs[0], image))))
+    picks = {"pick-1": str(picked)}
+    dispatcher = make(resolvePick=lambda kind, pickId: picks.get(pickId))
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True,
+                                   {"logo": "pick-1"})
+    assert status.params["logo"] == os.path.normpath(str(picked))
+    assert dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {
+        "logo": str(picked)}).detail == "logo: unknown pick id"
+    # Kept as the path: the start checks it as stored.
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-1"})
+    _run_once(dispatcher, clock, 0)
+    assert jobs.calls[0][3]["logo"] == os.path.normpath(str(picked))
+
+
+# ── Refresh, samples, unusable, Forget (review S8) ──────────────────────
+
+def test_refresh_keeps_the_pending_trigger_and_the_windows(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    for n in range(HOOK_RATE_WINDOW_MAX_STARTS):
+        dispatcher.ResultImageSaved(f"C:\\out\\results\\{n}.png")
+        dispatcher.Pump()
+        clock.t += 1
+    jobs.busy = True
+    dispatcher.ResultImageSaved("C:\\out\\results\\held.png")
+    dispatcher.Pump()
+    dispatcher.Refresh()
+    assert _status(dispatcher, IMAGE_KEY).pending
+    jobs.busy = False
+    dispatcher.LaneFreed()
+    dispatcher.Pump()
+    # Still 6 in the last 60 s: the held one is skipped.
+    assert len(jobs.calls) == HOOK_RATE_WINDOW_MAX_STARTS
+    assert _status(dispatcher, IMAGE_KEY).history[0].outcome == (
+        HookOutcome.SKIPPED_RATE_LIMIT)
+
+
+def test_samples_count_in_no_window(setup):
+    registry, jobs, clock, make, _ = setup
+    registry.add(badge=Badge.DEV)
+    dispatcher = _enabled(make, MATCH_KEY)
+    dispatcher._samplesDir = str(SAMPLES)
+    for n in range(HOOK_RATE_WINDOW_MAX_STARTS):
+        assert isinstance(dispatcher.TrySample(PLUGIN, MATCH_KEY), RunRecord)
+    dispatcher.MatchCandidate("rec-1", _line([3, 1]))
+    dispatcher.Pump()
+    clock.t += 5
+    dispatcher.Pump()
+    assert len(jobs.calls) == HOOK_RATE_WINDOW_MAX_STARTS + 1
+
+
+def test_a_pending_trigger_of_a_job_no_longer_usable_is_discarded(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    jobs.busy = True
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    registry.unusable.add(PLUGIN)
+    jobs.busy = False
+    dispatcher.LaneFreed()
+    dispatcher.Pump()
+    assert jobs.calls == []
+    status = _status(dispatcher, IMAGE_KEY)
+    assert not status.pending
+    assert status.history[0].reason == "unusable"
+
+
+@pytest.mark.parametrize("reason,keeps", [
+    (HookDisabledReason.RECONSENT, False),
+    (HookDisabledReason.USER, True),
+])
+def test_forget_puts_the_values_back_only_for_a_new_consent(
+        setup, reason, keeps):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, MATCH_KEY, **{MATCH_KEY: {"style": "games"}})
+    dispatcher.RunEnded(PLUGIN, MATCH_KEY, _record(
+        "r", JobState.FAILED, reason=EndReason.ABNORMAL_EXIT))
+    dispatcher.Pump()
+    dispatcher.Forget(PLUGIN, reason)
+    status = _status(dispatcher, MATCH_KEY)
+    assert not status.enabled and status.disabled_reason == reason
+    assert dict(status.params) == ({"style": "games"} if keeps else {})
+    assert status.failures == (1 if keeps else 0)
