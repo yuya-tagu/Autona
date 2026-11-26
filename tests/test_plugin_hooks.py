@@ -653,7 +653,11 @@ def test_a_dev_plugin_tries_the_golden_input_uncounted(setup):
     dispatcher.Pump()
     status = _status(dispatcher, MATCH_KEY)
     assert status.failures == 0 and status.history == ()
-    # No golden image: a result_image_saved sample is unavailable.
+    # The stand-in golden image: a result_image_saved sample starts too.
+    assert isinstance(dispatcher.TrySample(PLUGIN, IMAGE_KEY), RunRecord)
+    assert jobs.calls[1][5]["image"].path == str(SAMPLES / "result_image.png")
+    # Without the sample file it is unavailable.
+    dispatcher._samplesDir = str(SAMPLES / "missing")
     assert dispatcher.TrySample(PLUGIN, IMAGE_KEY).reason == (
         StartRefusal.UNAVAILABLE)
 
@@ -1012,7 +1016,7 @@ def test_saved_values_that_no_longer_fit_disable_the_hook(setup):
     assert jobs.calls == []
     status = _status(dispatcher, MATCH_KEY)
     assert not status.enabled
-    assert status.disabled_reason == HookDisabledReason.RECONSENT
+    assert status.disabled_reason == HookDisabledReason.PARAMS_CHANGED
     assert status.history[0].reason == "invalid_params"
     assert not dispatcher.Wanted(HookEvent.MATCH_DECIDED)
 
@@ -1024,7 +1028,7 @@ def test_a_start_refused_invalid_disables_the_hook(setup):
     _run_once(dispatcher, clock, 0)
     status = _status(dispatcher, IMAGE_KEY)
     assert not status.enabled and status.failures == 0
-    assert status.disabled_reason == HookDisabledReason.RECONSENT
+    assert status.disabled_reason == HookDisabledReason.PARAMS_CHANGED
 
 
 def test_a_file_value_is_a_pick_id(setup, tmp_path):
@@ -1106,7 +1110,10 @@ def test_a_pending_trigger_of_a_job_no_longer_usable_is_discarded(setup):
 
 
 @pytest.mark.parametrize("reason,keeps", [
+    (HookDisabledReason.NEW_INSTALL, False),
     (HookDisabledReason.RECONSENT, False),
+    (HookDisabledReason.BLOCKED, True),
+    (HookDisabledReason.REMOVED, True),
     (HookDisabledReason.USER, True),
 ])
 def test_forget_puts_the_values_back_only_for_a_new_consent(
@@ -1121,3 +1128,7 @@ def test_forget_puts_the_values_back_only_for_a_new_consent(
     assert not status.enabled and status.disabled_reason == reason
     assert dict(status.params) == ({"style": "games"} if keeps else {})
     assert status.failures == (1 if keeps else 0)
+    # A new install is another plugin: no history, no last error.
+    fresh = reason == HookDisabledReason.NEW_INSTALL
+    assert (status.history == ()) == fresh
+    assert (status.last_error is None) == fresh

@@ -4,8 +4,7 @@ and checks every manifest, keeps the list, judges ``describe`` answers.
 Where plugins come from (``Scan``):
 
 - the built-in vodsplit (D9): a manifest made here (``BUILTIN_ID``, lane
-  heavy, no time limit -- ``timeout_seconds`` None, which PluginTypes'
-  ``Job`` is to allow --, manual only: its own page) that points at the
+  heavy, no time limit -- ``timeout_seconds`` None --, manual only: its own page) that points at the
   folder ArchiveWorker already uses (``ArchiveWorker.WORKER_DIR`` under the
   Autona folder). Never checked against the schema, never disabled or
   blocked; its own way of starting (``version`` for describe,
@@ -83,10 +82,10 @@ from .PluginTypes import (
     SOURCE_FIELD_TYPES, STATE_PRECEDENCE, TEXT_MAX_LENGTH, URL_MAX_LENGTH,
     VERSION_PATTERN, Action, ActionTarget, Badge, DescribeAnswer,
     DescribeFailure, DescribeResult, DescribeRun, DevFolder, Field,
-    FieldType, Hook, HookEvent, InstallSource, Job, Lane, ListEntry,
-    Manifest, ManifestCheck, ManifestProblem, ManifestReport, Option,
-    Permissions, PluginState, ProblemScope, Refused, RegisteredPlugin,
-    StartRefusal, Text, UpdateSource)
+    FieldType, Hook, HookEvent, InstallSource, InstallSourceKind, Job, Lane,
+    ListEntry, Manifest, ManifestCheck, ManifestProblem, ManifestReport,
+    OFFICIAL_REPO_IDS, Option, Permissions, PluginState, ProblemScope,
+    Refused, RegisteredPlugin, StartRefusal, Text, UpdateSource)
 
 # ── the built-in vodsplit (D9) ──────────────────────────────────────────
 
@@ -94,9 +93,6 @@ BUILTIN_ID = "taguyan.vodsplit"
 PLUGINS_DIR = "plugins"
 DEV_LIST_FILE = "dev.json"
 DEV_ENV = "AUTONA_PLUGIN_DEV"
-# The official repositories' numeric ids (D7: a taguyan. id comes only from
-# these). Empty until the first official plugin repository exists.
-OFFICIAL_REPO_IDS = frozenset()
 # A swap's leftovers, never a plugin (PluginInstaller sweeps them).
 _SKIPPED_SUFFIXES = (".new", ".old")
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -382,7 +378,8 @@ class PluginRegistry:
     # ── the manifest's check ───────────────────────────────────────────
 
     def Check(self, raw: Any, folder: str, source: Optional[InstallSource],
-              *, dev: bool, hostVersion: str) -> ManifestReport:
+              *, dev: bool, hostVersion: str,
+              expectedId: Optional[str] = None) -> ManifestReport:
         found = _Problems()
         if not isinstance(raw, dict):
             found.items.append(_Unreadable("not a JSON object"))
@@ -409,10 +406,13 @@ class PluginRegistry:
             found.plugin(ManifestCheck.INVALID_FIELD, "id",
                          "a Windows device name")
             return ManifestReport(None, tuple(found.items))
-        if not dev and os.path.basename(os.path.normpath(folder)) != pluginId:
+        # The installer's <id>.new folder names the id it expects.
+        if expectedId is None:
+            expectedId = os.path.basename(os.path.normpath(folder))
+        if not dev and expectedId != pluginId:
             found.plugin(ManifestCheck.ID_FOLDER_MISMATCH, "id")
         if pluginId.startswith(RESERVED_ID_PREFIX) and not dev and not (
-                source is None or (source.kind == "github"
+                source is None or (source.kind == InstallSourceKind.GITHUB
                                    and source.repo_id in self._officialRepoIds)):
             found.plugin(ManifestCheck.ID_RESERVED, "id")
 
@@ -961,7 +961,8 @@ class PluginRegistry:
                 logger.warning("Plugins: an installed folder has the built-in's id")
                 continue
             plugins[name] = self._Registered(
-                name, folder, Badge.LISTED if source.kind == "github" else Badge.MANUAL,
+                name, folder, Badge.LISTED if source.kind == InstallSourceKind.GITHUB
+                else Badge.MANUAL,
                 report)
 
         folders, active, devPlugins, devProblems = self._ScanDev(plugins)
@@ -1001,8 +1002,7 @@ class PluginRegistry:
         version = self._Call(self._builtinVersion, "") or ""
         job = Job(id="run", title={"ja": "アーカイブ切り抜き", "en": "Archive Clipper"},
                   lane=Lane.HEAVY,
-                  # None: no time limit (Job.timeout_seconds is typed int in
-                  # PluginTypes; the contract patch makes it Optional).
+                  # None: no time limit (a built-in job's only).
                   # Manual false: it runs from its own page, never the
                   # generic form.
                   timeout_seconds=BUILTIN_VODSPLIT.timeout_seconds, manual=False)

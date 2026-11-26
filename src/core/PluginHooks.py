@@ -33,7 +33,7 @@ the lane is free):
 3. right before a start, the saved values are checked against the job's
    fields again (a plugin update may have changed them): values that no
    longer fit -- or a start refused INVALID_REQUEST -- disable the hook
-   (``reconsent``: its values have to be confirmed again, D.6);
+   (``params_changed``: its values have to be confirmed again, D.6);
 4. then the 60 s sliding window: HOOK_RATE_WINDOW_MAX_STARTS started in it
    already skips this one (``skipped_rate_limit``; not kept pending);
 5. right after a start, the 1 h sliding window: more than
@@ -80,8 +80,9 @@ it once per decided record).
 
 The dev plugins' 'try with the sample input' (D.6) is ``TrySample``: one
 start with the golden input of ``samplesDir`` (docs/plugins/inputs/), not
-counted in the windows nor the failures. There is no golden image, so a
-result_image_saved sample needs ``result_image.png`` in ``samplesDir``.
+counted in the windows nor the failures. A result_image_saved sample
+uses the stand-in ``result_image.png`` (contract_1.json field_types
+source[].golden).
 
 Threads and locks
 -----------------
@@ -139,8 +140,8 @@ DISPATCHER_THREAD = "AutonaPluginHooks"
 HOOKS_FILE = "hooks.json"
 PLUGINS_DIR = "plugins"
 DEV_DIR = "_dev"
-# The golden input files of a sample run (docs/plugins/inputs/). There is
-# no golden image: a result_image_saved sample needs this one in samplesDir.
+# The golden input files of a sample run (docs/plugins/inputs/; the image
+# is a stand-in).
 SAMPLE_FILES = MappingProxyType({
     HookEvent.MATCH_DECIDED: "match_record.json",
     HookEvent.RESULT_IMAGE_SAVED: "result_image.png",
@@ -430,10 +431,11 @@ class PluginHooks:
 
     def Forget(self, pluginId, reason):
         """Disable every hook of the plugin and drop its pending triggers
-        (new install, reconsent, removal, block). A new install and a
+        (new install, reconsent, block, removal). A new install and a
         reconsent also put the values back to the defaults and the failures
-        to 0 (D.6, D.7). Called before the plugin's user_data folder is
-        removed."""
+        to 0 (D.6, D.7); a new install also clears the history and the last
+        error (another plugin now). A removal's is called before the
+        plugin's user_data folder is removed."""
         reason = HookDisabledReason(reason)
         with self._stateLock:
             state = self._Loaded(pluginId)
@@ -445,6 +447,9 @@ class PluginHooks:
                               HookDisabledReason.RECONSENT):
                     entry.params = {}
                     entry.failures = 0
+                if reason == HookDisabledReason.NEW_INSTALL:
+                    entry.history = []
+                    entry.lastError = None
             if state.hooks:
                 self._Save(pluginId)
             self._Recount()
@@ -620,7 +625,7 @@ class PluginHooks:
             return True
         params = _CheckParams(job, entry.params, stored=True)
         if isinstance(params, Refused):
-            self._Disable(entry, HookDisabledReason.RECONSENT)
+            self._Disable(entry, HookDisabledReason.PARAMS_CHANGED)
             self._Remember(entry, HookOutcome.DISCARDED,
                            reason=REASON_INVALID_PARAMS)
             self._Save(pluginId)
@@ -656,7 +661,7 @@ class PluginHooks:
             if result.reason == StartRefusal.NEEDS_SETTINGS:
                 self._Remember(entry, HookOutcome.NEEDS_SETTINGS)
             elif result.reason == StartRefusal.INVALID_REQUEST:
-                self._Disable(entry, HookDisabledReason.RECONSENT)
+                self._Disable(entry, HookDisabledReason.PARAMS_CHANGED)
                 self._Remember(entry, HookOutcome.DISCARDED,
                                reason=REASON_INVALID_PARAMS)
             else:

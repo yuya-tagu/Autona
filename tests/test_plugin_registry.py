@@ -308,6 +308,22 @@ def test_the_id_must_be_its_folders_name_but_in_a_dev_folder(tmp_path):
     assert dev.problems == ()
 
 
+def test_an_install_checks_the_id_it_expects_in_its_new_folder(tmp_path):
+    folder = _plugin(tmp_path / "app" / "plugins", _example(),
+                     name="taguyan.webhook.new")
+    registry = _registry(tmp_path)
+    expected = registry.Check(_example(), str(folder), OFFICIAL, dev=False,
+                              hostVersion=HOST, expectedId="taguyan.webhook")
+    assert expected.problems == ()
+    other = registry.Check(_example(), str(folder), OFFICIAL, dev=False,
+                           hostVersion=HOST, expectedId="taguyan.other")
+    assert ("id_folder_mismatch", "plugin", None) in _found(other)
+    # Without one, the folder's name: <id>.new is not the id.
+    plain = registry.Check(_example(), str(folder), OFFICIAL, dev=False,
+                           hostVersion=HOST)
+    assert ("id_folder_mismatch", "plugin", None) in _found(plain)
+
+
 @pytest.mark.parametrize("source, dev, reserved", [
     (OFFICIAL, False, False),
     (None, False, False),                      # the built-in

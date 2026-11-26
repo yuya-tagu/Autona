@@ -324,15 +324,15 @@
       {"type": "select", "value": "string (an option's value)", "ui": "select", "where": ["params", "settings"], "extras": {"options": {"required": true, "min_items": 1, "max_items": 100, "item": {"value": "string", "label": "text"}}}},
       {"type": "file", "value": "absolute path (no UNC)", "ui": "pickFile (shell request)", "where": ["params", "settings"], "extras": {"extensions": {"required": true, "min_items": 1, "item": "^[a-z0-9]{1,10}$"}}, "request_body": "a pick id", "stored": "the absolute path the host resolved the pick id to", "shown": "the file name only (GET answers the name, never the path)"},
       {"type": "folder", "value": "absolute path (no UNC)", "ui": "pickFolder (shell request)", "where": ["params", "settings"], "extras": {}, "request_body": "a pick id", "stored": "the absolute path the host resolved the pick id to", "shown": "the folder name only (GET answers the name, never the path)"},
-      {"type": "secret", "value": "string, no line break, up to 4096", "ui": "masked; shows 'set' only", "where": ["settings"], "extras": {}, "stored": "DPAPI (CurrentUser) in user_data/plugins/<id>/secrets.bin (dev: user_data/plugins/_dev/<id>/secrets.bin)", "passed": "environment variable AUTONA_SECRET_<KEY in upper case> only; never in request.json, job.json or a log"}
+      {"type": "secret", "value": "string of 1 to 4096 characters with no line break, NUL or other control character (Unicode category Cc); another, or an empty one, is refused (invalid_request; DELETE clears it)", "ui": "masked; shows 'set' only", "where": ["settings"], "extras": {}, "stored": "DPAPI (CurrentUser) in user_data/plugins/<id>/secrets.bin (dev: user_data/plugins/_dev/<id>/secrets.bin)", "passed": "environment variable AUTONA_SECRET_<KEY in upper case> only; never in request.json, job.json or a log"}
     ],
     "source": [
-      {"type": "match_log", "format": 1, "file": "<key>.jsonl", "content": "match log lines (JSONL), as MatchLogService writes them", "manual": "pick a date and a tournament", "context_only": false, "desktop_only": false, "at_trigger": "the log file of the open record's start date (today's when no record is open), every line (an empty file when none); the host flushes MatchLogService's writer (Flush) before copying", "at_trigger_known_limit": "records started on an earlier date (a session past midnight) are in that date's file and are not included", "golden": "inputs/match_log.jsonl"},
+      {"type": "match_log", "format": 1, "file": "<key>.jsonl", "content": "match log lines (JSONL), as MatchLogService writes them (split on line feeds only); a line that is not a JSON object -- one a crash cut short -- is dropped", "manual": "pick a date and a tournament", "choice_id": "YYYYMMDD (the whole day) or YYYYMMDD/<tournament> (that day's records whose tournament is exactly it; an empty one: the records with none)", "context_only": false, "desktop_only": false, "at_trigger": "the log file of the open record's start date (today's when no record is open), every line that is a JSON object (an empty file when none); the host flushes MatchLogService's writer (Flush) before copying", "at_trigger_known_limit": "records started on an earlier date (a session past midnight) are in that date's file and are not included", "golden": "inputs/match_log.jsonl"},
       {"type": "match_record", "format": 1, "file": "<key>.json", "content": "one match record (one line of the log, as one JSON object)", "manual": null, "context_only": true, "desktop_only": false, "at_trigger": null, "golden": "inputs/match_record.json"},
       {"type": "state", "format": 1, "file": "<key>.json", "content": "a copy of the published state (the shape of out/program_state.json)", "manual": "no choice: the state at the press (manual included)", "context_only": false, "desktop_only": false, "at_trigger": "the published state at the trigger", "golden": "inputs/state.json"},
-      {"type": "result_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one result image (png / jpg) and its sha256", "manual": "the newest 30 of out/results", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true},
-      {"type": "thumbnail_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one match thumbnail and its sha256", "manual": "the generated thumbnails", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true},
-      {"type": "archive_export", "format": 1, "file": "<key>.json", "content": "the list of an archive export (JSON; the clips stay where they are). Its shape is settled in P3 against the YouTube ADR, during the preview", "manual": null, "context_only": true, "desktop_only": false, "at_trigger": null, "shape_settled": false}
+      {"type": "result_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one result image (png / jpg) and its sha256", "manual": "the newest 30 of out/results", "choice_id": "the file name in out/results", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true, "golden": "inputs/result_image.png", "golden_note": "a stand-in image (not a real result): the dev plugins' sample run of a result_image_saved hook (PluginHooks.TrySample)"},
+      {"type": "thumbnail_image", "format": 1, "file": "<key>.png | <key>.jpg (a .jpeg is written as .jpg)", "content": "one match thumbnail and its sha256", "manual": "the generated thumbnails", "choice_id": "the file name in out/thumbnails", "context_only": false, "desktop_only": true, "at_trigger": null, "sha256": true},
+      {"type": "archive_export", "format": 1, "file": "<key>.json", "content": "the list of an archive export (JSON; the clips stay where they are): an archive job's clips/export.json, the clips it marks exported and not skipped whose file is in the clips folder, in its order", "manual": null, "context_only": true, "desktop_only": false, "at_trigger": null, "shape": {"job": "string (the archive job id)", "clips_dir": "string (absolute path of the job's clips folder)", "clips": "array of {no: integer (from 1), path: string (absolute), file: string (its file name), title: string, start: number (seconds), end: number (seconds)}"}, "shape_settled": false, "shape_note": "The least shape (lane L3). P3 widens it against the YouTube ADR by adding fields only, during the preview (format stays 1)."}
     ],
     "source_fields_ignore": ["default"],
     "manual_pick_types": ["match_log", "state", "result_image", "thumbnail_image"],
@@ -375,10 +375,10 @@
     "codes": [
       {"code": "manifest_unreadable", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "missing, over manifest_max_bytes, not UTF-8 (a BOM is accepted), not a JSON object"},
       {"code": "manifest_version_unknown", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check"},
-      {"code": "invalid_field", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "the top level or settings breaks the schema"},
+      {"code": "invalid_field", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "the top level or settings breaks the schema; also a job id used by two jobs (the schema cannot say it), and an id with a part that is a Windows device name (con, nul, aux, prn, com1-9, lpt1-9)"},
       {"code": "invalid_job_field", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check", "note": "a job breaks #/$defs/job in a way no other code names"},
       {"code": "unknown_key", "scope": "warning", "schema": null, "owner": "PluginRegistry.Check", "note": "an unknown top-level key: ignored"},
-      {"code": "id_folder_mismatch", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "id_folder_mismatch", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "the id against the folder's name, or against the id the installer expects for its <id>.new folder (Check's expectedId). Never for a dev folder: its name is free"},
       {"code": "id_reserved", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "taguyan. from anything but the official repository ids (the source passed to Check) or a dev folder"},
       {"code": "id_taken", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Scan", "note": "a dev folder with an installed id, or the other way round: the one added later is refused. Check alone cannot see it"},
       {"code": "protocol_unsupported", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check"},
@@ -386,7 +386,7 @@
       {"code": "min_autona_newer", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
       {"code": "entry_reserved", "scope": "plugin", "schema": "top", "owner": "PluginRegistry.Check", "note": "entry[0] starts with @"},
       {"code": "entry_outside", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "after resolving (the schema catches the plain absolute / .. forms)"},
-      {"code": "entry_missing", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
+      {"code": "entry_missing", "scope": "plugin", "schema": null, "owner": "PluginRegistry.Check", "note": "entry[0] is not there; installed: also when it is not a file ending in .exe"},
       {"code": "icon_invalid", "scope": "warning", "schema": null, "owner": "PluginRegistry.Check", "note": "not a relative .png path inside the folder (checked after resolving), not a png signature, over icon_max_bytes: no icon. An icon never makes the plugin unusable, so the schema holds it to a string only"},
       {"code": "key_duplicate", "scope": "job", "settings_scope": "plugin", "schema": null, "owner": "PluginRegistry.Check"},
       {"code": "secret_outside_settings", "scope": "job", "schema": "job", "owner": "PluginRegistry.Check"},
@@ -414,16 +414,36 @@
     "user_data_dir": "user_data/plugins/<id>/",
     "dev_user_data_dir": "user_data/plugins/_dev/<id>/",
     "dev_list": "user_data/plugins/dev.json",
+    "dev_list_fields": {
+      "enabled": "boolean: the developer toggle (dev.json's folders are scanned only while it is true)",
+      "folders": "array of absolute paths, in the order they were added"
+    },
+    "dev_list_note": "UTF-8 (a BOM is accepted when read), written whole. One that cannot be read is moved aside before the next write, never overwritten; until then the toggle reads off and the list empty.",
     "dev_folder_key": "patterns.dev_folder_id (a folder is named by it, never by its position)",
     "dev_env": "AUTONA_PLUGIN_DEV (';'-separated folders)",
     "config": "user_data/plugins/<id>/config.json",
     "secrets": "user_data/plugins/<id>/secrets.bin",
     "hooks": "user_data/plugins/<id>/hooks.json",
     "install": "user_data/plugins/<id>/install.json",
+    "install_fields": {
+      "source": "object: {kind: install.source_kinds, repo_id: integer (github only), name: string owner/repo when installed (github only; display)}",
+      "version": "string (the installed manifest's)",
+      "sha256": "string | null (the installed zip's SHA-256)",
+      "consent_digest": "string (PluginInstaller.ConsentDigest)",
+      "installed_at": "ISO 8601, seconds, with offset"
+    },
+    "install_note": "UTF-8 without a BOM, written by the installer only, inside the swap. One that cannot be read makes the next install of the id a new install (the safe side).",
     "data_dir": "user_data/plugins/<id>/data/",
     "listing_copy": "user_data/plugins/_listing.json",
     "work_dir": "<archive.work_dir>/plugins/<id>/<run_id>/",
     "job_files": ["request.json", "job.json", "worker.log", "inputs/", "out/"]
+  },
+
+  "install": {
+    "source_kinds": ["github", "manual"],
+    "source_kinds_note": "github: downloaded from the listing or an update, or a manual zip whose SHA-256 matched that repository's latest release descriptor (C.3); manual: any other zip. A dev folder and the built-in have no install.json.",
+    "zip_problems": ["zip_unreadable", "too_many_entries", "expanded_too_large", "unsafe_path", "bad_name", "not_ascii", "reserved_name", "link", "encrypted", "duplicate_name", "path_too_long", "zip_too_large", "descriptor_invalid", "size_mismatch", "sha256_mismatch", "not_one_folder", "folder_not_id", "manifest_missing", "manifest_unreadable", "id_mismatch", "version_mismatch", "entry_outside", "entry_missing"],
+    "zip_problems_note": "PluginInstaller.CheckZip's codes (C.1 / C.7): the zip's own rules first (unreadable, over zip_max_entries / zip_expanded_max_bytes, a path that escapes, a bad, non-ASCII or reserved name, a link, an encrypted entry, a name twice, the longest installed path over installed_path_max_length), then over zip_max_bytes, the release descriptor (its fields, the zip's size and SHA-256), and the layout (one <id>/ folder named a plugin id, its plugin.json readable, the id and version against the descriptor, entry[0] a file of the zip)."
   },
 
   "environment": {
@@ -527,7 +547,7 @@
   },
 
   "refusals": {
-    "description": "Why a request (a start, a describe, a settings save, a dev folder, an install) is not carried out. v1 answers error.reason the code with the status of its row (409 CONFLICT unless said).",
+    "description": "Why a request (a start, a describe, a settings save, a dev folder, an install) is not carried out. v1 answers error.reason the code with the status of its row (409 CONFLICT unless said) and error.code that status's v1 code (400 INVALID_ARGUMENT, 404 NOT_FOUND, 409 CONFLICT, 503 UNAVAILABLE); error.message is the refusal's detail (never a path, a value or a secret), for busy the remaining seconds when known (routes_v1.json envelope).",
     "codes": [
       {"reason": "busy", "status": 409, "note": "the lane is full; carries the remaining seconds when known"},
       {"reason": "needs_settings", "status": 409, "note": "a required setting (secret too) is missing; not a hook failure"},
@@ -538,7 +558,7 @@
       {"reason": "id_taken", "status": 409, "note": "a dev folder with an installed id, or an install with a dev folder's"},
       {"reason": "invalid_request", "status": 400, "note": "a body that does not fit: an unknown job or key, a value of the wrong type, an unknown pick id"},
       {"reason": "not_found", "status": 404},
-      {"reason": "unavailable", "status": 503, "note": "a desktop feature asked in the headless shell (an image input, a hook), or the shell is shutting down. SHELL routes answer 403 headless before this"}
+      {"reason": "unavailable", "status": 503, "note": "a desktop feature asked in the headless shell (an image input, a hook), the shell is shutting down, or the host could not write its own file (dev.json, config.json, hooks.json, a run's folder; the detail says which, never the path). SHELL routes answer 403 headless before this"}
     ]
   },
 
@@ -549,7 +569,8 @@
     "auto_disable_shown": "on the hook's row (HookStatus: disabled_reason, last_error); never in the list's state",
     "match_decided_candidates": "MatchCandidate again for a record waiting: the line is replaced, the wait keeps counting from the first candidate. The dispatcher keeps the fired mark per record; a candidate of a fired record is ignored. MatchWithdrawn cancels the wait without marking.",
     "history_outcomes": ["done", "error", "failed", "cancelled", "overwritten", "discarded", "skipped_rate_limit", "needs_settings"],
-    "disabled_reasons": ["user", "rate_limit", "failures", "reconsent", "new_install"],
+    "disabled_reasons": ["user", "rate_limit", "failures", "reconsent", "new_install", "blocked", "removed", "params_changed"],
+    "disabled_reasons_note": "user: the user turned it off. rate_limit, failures, params_changed: the dispatcher, for that hook only (params_changed: a saved value no longer fits the job's fields -- an update changed them -- or the start was refused invalid_request; the user confirms the values again). reconsent, new_install, blocked, removed: PluginHooks.Forget, for every hook of the plugin (reconsent and new_install put the values back to the defaults and the failures to 0; new_install also clears the history and the last error: another plugin now; removed comes before its user_data folder goes). A plugin's own disable leaves its hooks as they are: a pending one is discarded when it would start (disabled).",
     "order": "trigger -> held when the light lane is full (overwrite) -> before the start the 60 s window (skip or start) -> after the start the 1 h window (disable when over)"
   }
 }
