@@ -145,7 +145,9 @@ from .AutonaWebPageLifecycle import (
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaNetworkHelper import GetLocalIP, GetLocalIPs
-from .core import WebAccess
+from .core import PluginLinks, WebAccess
+from .core.ShellPicks import (EXTENSIONS_ARGUMENT_PATTERN,
+                              FOLDER_PURPOSES as PICK_FOLDER_PURPOSES)
 from . import ui_constants as UI
 
 logger = logging.getLogger(__name__)
@@ -543,7 +545,10 @@ class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
 # What a page of the Web UI asks of the desktop itself -- the window's
 # "always on top", the update check, one of a fixed few outside addresses, a
 # game folder to import (SF-5a-2: the native dialog; core holds the path,
-# the page gets an id) -- with no privileged channel (no QWebChannel, no script injected): in a click,
+# the page gets an id), a file or folder for a plugin and a plugin's link
+# (ADR-009 D4: pickFile / pickFolder, openPluginLink; core holds the path or
+# builds the URL, the page gets an id and a name) -- with no privileged
+# channel (no QWebChannel, no script injected): in a click,
 # the page's script opens a new window of this server's /web/shell-request
 # (web/src/PanelShell/hostApi.ts, shellRequest), which the view never makes.
 # _PanelPage._OpenOutside takes it instead, as it takes the Designer's URL,
@@ -556,17 +561,41 @@ class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
 # (window.autonaPanelShell.shellResult); the shell's state goes to the page
 # on its load and on every change (shellState).
 SHELL_REQUEST_PATH = "/web/shell-request"
+
+
+class _Matching:
+    """An argument's values given by a pattern (re.fullmatch), as
+    SHELL_VERBS' `in` reads them: a str that matches, nothing else."""
+
+    def __init__(self, pattern):
+        self._pattern = re.compile(pattern)
+
+    def __contains__(self, value):
+        return (isinstance(value, str)
+                and self._pattern.fullmatch(value) is not None)
+
+
 # Verb -> {argument: the values it may take}. Nothing but these values gets
 # to a verb: openExternal names a key of EXTERNAL_LINKS, never a URL;
-# pickFolder takes none (the operator names the folder in the dialog).
+# pickFolder says what the folder is for and never names one (the operator
+# names it in the dialog); pickFile names a file field's extensions, never a
+# file nor a folder (ADR-009 D4); openPluginLink names a plugin and which of
+# its links, never a URL (core's PluginLinks builds it).
 SHELL_VERBS = {
     "alwaysOnTop": {"on": ("0", "1")},
     "checkUpdates": {},
     "openExternal": {"target": tuple(EXTERNAL_LINKS)},
-    "pickFolder": {},
+    "pickFolder": {"purpose": PICK_FOLDER_PURPOSES},
+    "pickFile": {"extensions": _Matching(EXTENSIONS_ARGUMENT_PATTERN)},
+    "openPluginLink": {"source": PluginLinks.SOURCES,
+                       "id": _Matching(PluginLinks.LINK_ID_PATTERN),
+                       "link": PluginLinks.LINKS},
 }
 # What every request carries besides its verb's arguments.
 _SHELL_REQUEST_FIELDS = ("verb", "request", "ticket")
+# The most fields a request has (the verb with the most arguments).
+_SHELL_FIELDS_MAX = len(_SHELL_REQUEST_FIELDS) + max(
+    len(arguments) for arguments in SHELL_VERBS.values())
 _SHELL_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # A query longer than this is not read (bounded work: the verbs' requests
 # take under 200 characters).
@@ -648,7 +677,7 @@ def ParseShellRequest(url, pageUrls, serverUrl, ticketMatches):
         return None, "query"
     try:
         pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True,
-                          max_num_fields=len(_SHELL_REQUEST_FIELDS) + 1)
+                          max_num_fields=_SHELL_FIELDS_MAX)
     except ValueError:
         # Not its text: the message quotes the field, the ticket among them.
         return None, "query"

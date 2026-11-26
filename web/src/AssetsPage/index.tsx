@@ -481,7 +481,8 @@ function ZipCard({busy, onBusyChange, onImport, notice, setNotice}: {
     const pickFolder = () => {
         setNotice(null);
         const mine = ++picking.current;
-        const asked: Promise<ShellResult> = shellRequest("pickFolder");
+        const asked: Promise<ShellResult> = shellRequest(
+            "pickFolder", {purpose: "assets"});
         asked.then(async (result) => {
             if (mine !== picking.current) {
                 return;

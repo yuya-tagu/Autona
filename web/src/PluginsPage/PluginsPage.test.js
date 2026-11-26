@@ -613,6 +613,10 @@ describe("refusals and access", () => {
             .toBe("This cannot be chosen here yet.");
         expect(pickErrorText({code: "timeout"}))
             .toBe("The picker could not be opened.");
+        expect(pickErrorText({code: "bad_extension"}))
+            .toBe("A file of this type cannot be chosen.");
+        expect(pickErrorText({code: "not_local"})).toBe(
+            "Choose a place on this PC's drives, not a network location.");
     });
 
     test("in another computer's browser it lists and explains", async () => {

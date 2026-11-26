@@ -1569,6 +1569,8 @@
     "plugins_pick_folder": "フォルダを選ぶ",
     "plugins_pick_none": "未選択",
     "plugins_pick_failed": "選択の画面を開けませんでした。",
+    "plugins_pick_bad_extension": "この種類のファイルは選べません。",
+    "plugins_pick_not_local": "ネットワーク上の場所は選べません。この PC のドライブから選んでください。",
     "plugins_secret_set": "設定済み",
     "plugins_secret_clear": "消す",
     "plugins_err_required": "必須です。",

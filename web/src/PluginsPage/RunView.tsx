@@ -33,6 +33,10 @@ export function pickErrorText(error: unknown): string | null {
     if (code === "superseded") {
         return null;
     }
+    if (code === "bad_extension" || code === "not_local") {
+        // The desktop refused the file or folder picked.
+        return i18n.t(`plugins_pick_${code}`);
+    }
     return code === "unknown_verb" || code === "no_session"
         ? i18n.t("plugins_pick_unavailable") : i18n.t("plugins_pick_failed");
 }

@@ -1,5 +1,10 @@
 import {BASE_URL} from "../env";
 import {
+    ShellResult,
+    pickFileArgument,
+    shellRequest,
+} from "../PanelShell/hostApi";
+import {
     apiDelete,
     apiGetBlob,
     apiGetJson,
@@ -31,11 +36,15 @@ import {
 // a number, a select left empty, a file / folder released): the host removes
 // the saved value. A key not in the body stays as it is.
 //
-// A pick's answer (pickFile / pickFolder) carries `name` (the file or folder
-// name to show, never the path) next to the pick id; the page says "chosen"
-// without one. pickFolder today is the game assets' dialog: L10 (the wiring)
-// makes the shell request general for these, so until then both picks are
-// unimplemented here, as openPluginLink is.
+// The picks and the links are shell requests (hostApi.ts shellRequest, in
+// the click): pickFile (the field's extensions) and pickFolder (purpose
+// "plugin") answer the pick id and `name` (the file or folder name to show,
+// never the path; routes_v1.json pick_answer) -- the page says "chosen"
+// without one -- or nothing when the dialog was closed (null here).
+// openPluginLink names the plugin and the link; the desktop builds the URL.
+// A refusal rejects with an Error whose `code` is the desktop's error
+// (bad_extension, not_local, busy, not_ready, ...) or shellRequest's own
+// (no_session, timeout, superseded).
 //
 // A busy refusal carries the remaining seconds in its message (`detail`)
 // when known; the page shows that text after its own.
@@ -123,16 +132,40 @@ export const httpPluginsApi: PluginsApi = {
     reload: async (id) => {
         await apiPost(`${BASE}/${enc(id)}:reload`);
     },
-    // Neither pick is a general shell verb yet (L10 makes pickFolder and
-    // pickFile general): refused as an unknown verb until then.
-    pickFile: () => Promise.reject(
-        Object.assign(new Error("pickFile is not implemented"),
-                      {code: "unknown_verb"})),
-    pickFolder: () => Promise.reject(
-        Object.assign(new Error("pickFolder is not general yet"),
-                      {code: "unknown_verb"})),
-    // openPluginLink likewise (ADR-009 D4; stage P5b).
-    openLink: () => Promise.reject(
-        Object.assign(new Error("openPluginLink is not implemented"),
-                      {code: "unknown_verb"})),
+    pickFile: (extensions) => {
+        const argument = pickFileArgument(extensions);
+        if (argument === null) {
+            // The desktop would refuse it without an answer: not asked.
+            return Promise.reject(shellRefusal("bad_argument"));
+        }
+        return shellRequest("pickFile", {extensions: argument})
+            .then(pickAnswer);
+    },
+    pickFolder: () => shellRequest("pickFolder", {purpose: "plugin"})
+        .then(pickAnswer),
+    openLink: async (source, id, link) => {
+        const result = await shellRequest(
+            "openPluginLink", {source, id, link});
+        if (!result.ok) {
+            throw shellRefusal(result.error ?? "failed");
+        }
+    },
 };
+
+function shellRefusal(code: string): Error & {code: string} {
+    return Object.assign(new Error(`shell request refused: ${code}`), {code});
+}
+
+// A pick's answer as the page takes it: the pick, null for a closed dialog;
+// a refusal throws.
+function pickAnswer(result: ShellResult): PickResult | null {
+    if (!result.ok) {
+        throw shellRefusal(result.error ?? "failed");
+    }
+    if (result.status !== "picked" || typeof result.id !== "string"
+        || !result.id) {
+        return null;
+    }
+    return typeof result.name === "string" && result.name
+        ? {id: result.id, name: result.name} : {id: result.id};
+}

@@ -31,7 +31,11 @@ Also here:
   update check, one of the fixed outside addresses (AutonaExternalLinks.
   EXTERNAL_LINKS), a game folder to import picked in the native dialog
   (SF-5a-2: held by core's AssetPackService under an id, which the page
-  imports through v1; the path is never answered). The shared view
+  imports through v1; the path is never answered), a file or folder for a
+  plugin picked in the native dialog (ADR-009 D4: held by core's ShellPicks
+  under an id, answered with its name only) and a plugin's link opened in
+  the default browser (openPluginLink: core's PluginLinks builds the URL;
+  the page names the link, never a URL). The shared view
   (AutonaWebPanelHost, given this instance by the Window) decides a request
   is one and calls these.
 
@@ -56,6 +60,8 @@ from .AutonaExternalLinks import EXTERNAL_LINKS
 from .Helpers import AutonaQtHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .core import AssetPackService as assets
+from .core import PluginLinks
+from .core.ShellPicks import ParseExtensions, PickName
 from .core.TaskExecutor import TaskExecutor
 from .core.RenderLane import TemplateError
 from .core.Actions import AutonaActions
@@ -178,7 +184,8 @@ def _ProbePicked(service, path):
                      f"read: {type(error).__name__}")
         return {"ok": False, "error": "failed"}
     return {"ok": True, "status": "picked", "pick": pick,
-            "games": list(games), "conflicts": list(conflicts),
+            "name": PickName(path), "games": list(games),
+            "conflicts": list(conflicts),
             "expiresInSec": assets.PICK_EXPIRY_SECS}
 
 
@@ -190,10 +197,32 @@ class AutonaShellOperations:
     def __init__(self):
         # The main window, which does not exist yet (UiMounted).
         self._parent = None
-        # A pickFolder request is in hand (_PickFolder): its dialog is open,
-        # or the folder picked is being probed. One at a time, another
-        # request is answered "busy" meanwhile.
-        self._pickingFolder = False
+        # A pick is in hand (_PickFolder / _PickFile): its dialog is open,
+        # or the game folder picked is being probed. One at a time, another
+        # pickFolder / pickFile is answered "busy" meanwhile.
+        self._picking = False
+        # The plugin side (UsePlugins): where a plugin's pick is held
+        # (core's ShellPicks), the plugin registry (its Get(id), for an
+        # installed plugin's links) and the listing's lookup (id -> its
+        # "owner/name" repository; P5b). None until wired: the requests that
+        # need one answer "not_ready".
+        self._picks = None
+        self._registry = None
+        self._listingRepo = None
+
+    def UsePlugins(self, *, picks=None, registry=None, listingRepo=None):
+        """Wire the plugin side of the shell requests (ADR-009 D4): `picks`
+        (core's ShellPicks: pickFile and pickFolder for a plugin hold their
+        picks there), `registry` (PluginRegistry: openPluginLink's installed
+        plugins) and `listingRepo(id) -> "owner/name" | None`
+        (openPluginLink's listing rows). Each one passed replaces the one
+        held; one left out (None) stays as it is."""
+        if picks is not None:
+            self._picks = picks
+        if registry is not None:
+            self._registry = registry
+        if listingRepo is not None:
+            self._listingRepo = listingRepo
 
     def UiMounted(self, window):
         """The main window is there (Window.__init__): what shows the SCORE
@@ -280,9 +309,9 @@ class AutonaShellOperations:
     def ShellRequest(self, verb, args, answer=None):
         """Run shell request `verb` with `args` (its arguments, str values):
         its answer -- or None when it answers later, through `answer(the
-        answer)`, called once on the GUI thread (pickFolder, once the folder
-        picked is probed; not at all once the app shuts down meanwhile).
-        pickFolder needs `answer` (TypeError without it)."""
+        answer)`, called once on the GUI thread (pickFolder for a game folder,
+        once the folder picked is probed; not at all once the app shuts down
+        meanwhile). That pickFolder needs `answer` (TypeError without it)."""
         if verb == "alwaysOnTop":
             return self._AlwaysOnTop(args.get("on"))
         if verb == "checkUpdates":
@@ -290,7 +319,12 @@ class AutonaShellOperations:
         if verb == "openExternal":
             return self._OpenExternal(args.get("target"))
         if verb == "pickFolder":
-            return self._PickFolder(answer)
+            return self._PickFolder(args.get("purpose"), answer)
+        if verb == "pickFile":
+            return self._PickFile(args.get("extensions"))
+        if verb == "openPluginLink":
+            return self._OpenPluginLink(args.get("source"), args.get("id"),
+                                        args.get("link"))
         logger.warning(f"Shell operations - Unknown shell request {verb!r}")
         return {"ok": False, "error": "unknown_verb"}
 
@@ -338,7 +372,17 @@ class AutonaShellOperations:
             return {"ok": False, "error": "open_failed"}
         return {"ok": True}
 
-    def _PickFolder(self, answer):
+    def _PickFolder(self, purpose, answer):
+        """pickFolder for `purpose` (ShellPicks.FOLDER_PURPOSES): a game
+        folder to import (_PickGameFolder) or a plugin's folder
+        (_PickPluginFolder). Anything else is "bad_argument"."""
+        if purpose == "assets":
+            return self._PickGameFolder(answer)
+        if purpose == "plugin":
+            return self._PickPluginFolder()
+        return {"ok": False, "error": "bad_argument"}
+
+    def _PickGameFolder(self, answer):
         """Ask the operator for a game folder to import, in the native
         dialog over the main window (QFileDialog.getExistingDirectory: a
         modal loop of its own, so the host runs this from the event loop,
@@ -350,11 +394,12 @@ class AutonaShellOperations:
         answer goes to `answer` on the GUI thread (_HoldPicked).
 
         The answer never carries the path: {"ok": True, "status": "picked",
-        "pick": <id>, "games": [names], "conflicts": [the installed ones],
-        "expiresInSec"} -- v1's POST /assets:importFolder imports it by
-        "pick" -- or the same keys with "status": "cancelled" (nothing held,
-        a pick held before stays). One request at a time, from the dialog
-        to the probe's answer: another one meanwhile is "busy". "not_ready"
+        "pick": <id>, "name": <the folder's name>, "games": [names],
+        "conflicts": [the installed ones], "expiresInSec"} -- v1's POST
+        /assets:importFolder imports it by "pick" -- or the same keys with
+        "status": "cancelled" (nothing held, a pick held before stays). One
+        request at a time, from the dialog to the probe's answer: another
+        pick meanwhile is "busy". "not_ready"
         before the main window or the service is there; "unavailable" once
         the app is shutting down (no dialog, no probe: GuiExecutor's
         gui_unavailable_reason); a folder that holds no game is its
@@ -364,7 +409,7 @@ class AutonaShellOperations:
         OSError's reason: core's _JobText)."""
         if answer is None:
             raise TypeError("pickFolder answers later: pass `answer`")
-        if self._pickingFolder:
+        if self._picking:
             return {"ok": False, "error": "busy"}
         window = self._parent
         service = assets.AssetPackService.instance
@@ -372,7 +417,7 @@ class AutonaShellOperations:
             return {"ok": False, "error": "not_ready"}
         if AutonaQtHelper.gui_unavailable_reason() is not None:
             return {"ok": False, "error": "unavailable"}
-        self._pickingFolder = True
+        self._picking = True
         handedOn = False
         try:
             path = QFileDialog.getExistingDirectory(
@@ -381,7 +426,8 @@ class AutonaShellOperations:
                 _StartFolder())
             if not path:
                 return {"ok": True, "status": "cancelled", "pick": None,
-                        "games": [], "conflicts": [], "expiresInSec": 0}
+                        "name": None, "games": [], "conflicts": [],
+                        "expiresInSec": 0}
             if AutonaQtHelper.gui_unavailable_reason() is not None:
                 # The shutdown began while the dialog was open: the probe
                 # does not start.
@@ -396,7 +442,7 @@ class AutonaShellOperations:
             return None
         finally:
             if not handedOn:
-                self._pickingFolder = False
+                self._picking = False
 
     def _HoldPicked(self, answer, result):
         # On the job lane (the submit's `then`): the probe's answer goes to
@@ -411,8 +457,126 @@ class AutonaShellOperations:
         self._HoldPicked(answer, {"ok": False, "error": "failed"})
 
     def _PickAnswered(self, answer, result):
-        self._pickingFolder = False
+        self._picking = False
         answer(result)
+
+    def _PluginPickReady(self):
+        """((picks, window), None) for a plugin's pick, or (None, the
+        refusal): "busy" while another pick is in hand, "not_ready" before
+        the main window or the picks are there, "unavailable" once the app
+        is shutting down (no dialog)."""
+        if self._picking:
+            return None, {"ok": False, "error": "busy"}
+        window = self._parent
+        if window is None or self._picks is None:
+            return None, {"ok": False, "error": "not_ready"}
+        if AutonaQtHelper.gui_unavailable_reason() is not None:
+            return None, {"ok": False, "error": "unavailable"}
+        return (self._picks, window), None
+
+    def _HoldPluginPick(self, picks, kind, path, extensions=()):
+        """The answer to a plugin's pick of `path` ("" when the dialog was
+        closed) of `kind` ("file" / "folder"): held by core (ShellPicks) and
+        answered by its id and name (routes_v1.json pick_answer), never the
+        path -- {"ok": True, "status": "picked", "id", "name"} -- or
+        {"ok": True, "status": "cancelled"} (nothing held). A file of
+        another extension than `extensions` (one typed in the dialog's name
+        box) is "bad_extension"; a path not on a drive of this PC (a UNC
+        path) "not_local"; the app shutting down meanwhile "unavailable".
+        Logged without the path."""
+        if not path:
+            return {"ok": True, "status": "cancelled"}
+        if AutonaQtHelper.gui_unavailable_reason() is not None:
+            logger.info("Shell operations - The plugin's pick is not held: "
+                        "the app is shutting down")
+            return {"ok": False, "error": "unavailable"}
+        if kind == "file" and \
+                os.path.splitext(path)[1][1:].lower() not in extensions:
+            logger.info("Shell operations - The file picked for a plugin "
+                        "has another extension")
+            return {"ok": False, "error": "bad_extension"}
+        try:
+            pickId = picks.Hold(kind, path)
+        except ValueError:
+            logger.info(f"Shell operations - The {kind} picked for a plugin "
+                        "is not on a drive of this PC")
+            return {"ok": False, "error": "not_local"}
+        return {"ok": True, "status": "picked", "id": pickId,
+                "name": PickName(path)}
+
+    def _PickPluginFolder(self):
+        """Ask the operator for a plugin's folder (a folder field's value, a
+        dev folder to add; ADR-009 D4) in the native dialog over the main
+        window (QFileDialog.getExistingDirectory, run from the event loop as
+        _PickGameFolder's), and hold it (_HoldPluginPick). Answered now:
+        nothing is probed (the route that takes the id checks the folder
+        when it uses it). One pick at a time ("busy")."""
+        ready, refusal = self._PluginPickReady()
+        if refusal is not None:
+            return refusal
+        picks, window = ready
+        self._picking = True
+        try:
+            path = QFileDialog.getExistingDirectory(
+                window, QApplication.translate("app", "Select a folder"),
+                _StartFolder())
+            return self._HoldPluginPick(picks, "folder", path)
+        finally:
+            self._picking = False
+
+    def _PickFile(self, extensions):
+        """Ask the operator for a file for a plugin's file field (ADR-009
+        D4), of one of `extensions` ("png,jpg": ShellPicks.ParseExtensions;
+        anything else is "bad_argument"), in the native dialog over the main
+        window (QFileDialog.getOpenFileName with those extensions as its
+        filter, run from the event loop as _PickGameFolder's), and hold it
+        (_HoldPluginPick: the page gets its id and name, never the path).
+        One pick at a time ("busy")."""
+        allowed = ParseExtensions(extensions)
+        if allowed is None:
+            return {"ok": False, "error": "bad_argument"}
+        ready, refusal = self._PluginPickReady()
+        if refusal is not None:
+            return refusal
+        picks, window = ready
+        self._picking = True
+        try:
+            path, _filter = QFileDialog.getOpenFileName(
+                window, QApplication.translate("app", "Select a file"),
+                _StartFolder(), " ".join(f"*.{ext}" for ext in allowed))
+            return self._HoldPluginPick(picks, "file", path, allowed)
+        finally:
+            self._picking = False
+
+    def _OpenPluginLink(self, source, pluginId, link):
+        """Open a plugin's link in the default browser (ADR-009 D4,
+        openPluginLink): `source` "installed" / "listing", `pluginId`, `link`
+        "homepage" / "funding" / "repo". The URL is built by core
+        (PluginLinks.PluginLinkUrl: the installed manifest's homepage /
+        funding, or the listing row's GitHub repository; https only) --
+        never taken from the page. Its refusal is the answer's error
+        (PluginLinks' codes: "not_ready", "unknown_plugin", "blocked",
+        "no_link", "bad_link"); "open_failed" when the system opened
+        nothing. Logged without the URL."""
+        if source not in PluginLinks.SOURCES \
+                or link not in PluginLinks.LINKS \
+                or not isinstance(pluginId, str):
+            return {"ok": False, "error": "bad_argument"}
+        url, refusal = PluginLinks.PluginLinkUrl(
+            source, pluginId, link, registry=self._registry,
+            listingRepo=self._listingRepo)
+        if refusal is not None:
+            logger.info(f"Shell operations - The plugin's {link} link was "
+                        f"not opened: {refusal}")
+            return {"ok": False, "error": refusal}
+        address = QUrl(url, QUrl.ParsingMode.StrictMode)
+        if not address.isValid() or address.scheme() != "https":
+            return {"ok": False, "error": PluginLinks.BAD_LINK}
+        if not QDesktopServices.openUrl(address):
+            logger.warning(f"Shell operations - The system could not open "
+                           f"the plugin's {link} link")
+            return {"ok": False, "error": "open_failed"}
+        return {"ok": True}
 
     # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
     # bootstrap_gui() registers them as AutonaWebOperations.openSetSelection

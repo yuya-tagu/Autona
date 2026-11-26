@@ -933,7 +933,8 @@ test("the folder import asks the desktop in the click itself", async () => {
     expect(parsed.origin).toBe(window.location.origin);
     expect(parsed.pathname).toBe("/web/shell-request");
     expect(Object.fromEntries(parsed.searchParams)).toEqual({
-        verb: "pickFolder", request: expect.any(String), ticket: TICKET});
+        verb: "pickFolder", purpose: "assets", request: expect.any(String),
+        ticket: TICKET});
     expect(target).toBe("_blank");
     expect(features).toBe("noopener");
     expect(calls("POST", "/api/v1/assets:importFolder")).toHaveLength(0);

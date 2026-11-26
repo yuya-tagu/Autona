@@ -1576,6 +1576,8 @@
     "plugins_pick_folder": "Choose a folder",
     "plugins_pick_none": "Not chosen",
     "plugins_pick_failed": "The picker could not be opened.",
+    "plugins_pick_bad_extension": "A file of this type cannot be chosen.",
+    "plugins_pick_not_local": "Choose a place on this PC's drives, not a network location.",
     "plugins_secret_set": "Set",
     "plugins_secret_clear": "Clear",
     "plugins_err_required": "Required.",

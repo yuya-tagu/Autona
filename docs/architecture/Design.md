@@ -217,7 +217,7 @@ AutonaActions / core のドメインサービス ──► StateManager.Set / Un
 
 - 書き込みの入口は `AutonaWebOperations` 1 つ。デスクトップとヘッドレスの違いは、シェルが登録する操作だけ（デスクトップはシェル操作 3 本 `openSetSelection` / `renderThumbnail` / `startImageRender` を登録し、ヘッドレスは登録しないので 503 `UNAVAILABLE`）。
 - ヘッドレスは held にしない（書き込みは即時公開）。ボードの操作は両シェルともリクエストのスレッドで走り、終了の開始からはメインスレッド以外の `Run` を 503 で断る。
-- **共有ビューからのシェル要求**（デスクトップだけ・HTTP ルートではない）: 共有ビューのページがデスクトップに頼むこと（`alwaysOnTop` / `checkUpdates` / `openExternal` / `pickFolder`）は、`GET /api/v1/shell-session` のチケットを URL に入れた `/web/shell-request?verb=…` を開く形に限る。ホスト（`AutonaWebPanelHost`）が検査して `AutonaShellOperations.ShellRequest` を実行する。特権のチャネル（QWebChannel・注入スクリプト）は作らない。規則は `.claude/rules/state-and-webserver.md` の共有ビューの節。
+- **共有ビューからのシェル要求**（デスクトップだけ・HTTP ルートではない）: 共有ビューのページがデスクトップに頼むこと（`alwaysOnTop` / `checkUpdates` / `openExternal` / `pickFolder` / `pickFile` / `openPluginLink`）は、`GET /api/v1/shell-session` のチケットを URL に入れた `/web/shell-request?verb=…` を開く形に限る。ホスト（`AutonaWebPanelHost`）が検査して `AutonaShellOperations.ShellRequest` を実行する。特権のチャネル（QWebChannel・注入スクリプト）は作らない。規則は `.claude/rules/state-and-webserver.md` の共有ビューの節。
 
 #### 3.2.2 書き込み規約
 
