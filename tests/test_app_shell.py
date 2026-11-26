@@ -92,6 +92,7 @@ NAVIGATION = [
 # worker was there ("requires": "archive", the AppShell asked
 # /api/v1/archive/status) until A7, when its page began to install the
 # worker: it always shows, and no item requires anything.
+# "plugins" is the plugins page (ADR-009 D4): always shown, last in Data.
 ADDED_ITEMS = {
     3: [("archive", "scissors.svg", "app_archive", None),
         ("plugins", "list.svg", "app_plugins", None)],

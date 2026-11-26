@@ -15,7 +15,7 @@ jest.mock("../PanelShell/hostApi", () => ({
     shellRequest: (...args) => mockShellRequest(...args),
 }));
 
-const {httpPluginsApi} = require("./pluginsApi");
+const {httpPluginsApi, RELOAD_TIMEOUT_MS} = require("./pluginsApi");
 
 beforeEach(() => {
     mockShellRequest.mockReset();
@@ -27,8 +27,13 @@ test("a reload waits longer than the host's 60 s describe", async () => {
     await httpPluginsApi.reload("me.sandbox");
     expect(post).toHaveBeenCalledWith(
         "/api/v1/plugins/me.sandbox:reload", undefined,
-        {timeoutMs: 75000});
-    expect(75000).toBeGreaterThan(60000);
+        {timeoutMs: RELOAD_TIMEOUT_MS});
+    // Beyond the host's describe limit (contract_1.json), with room to spare.
+    const contract = JSON.parse(require("fs").readFileSync(
+        require("path").join(__dirname, "..", "..", "..", "docs", "plugins",
+                            "contract_1.json"), "utf8"));
+    expect(RELOAD_TIMEOUT_MS).toBeGreaterThan(
+        contract.limits.describe_timeout_seconds * 1000);
     post.mockRestore();
 });
 

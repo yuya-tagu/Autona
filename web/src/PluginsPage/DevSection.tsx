@@ -110,6 +110,11 @@ export default function DevSection({api, onChanged, onError}: {
         }
     };
 
+    // AUTONA_PLUGIN_DEV's folders are in effect whatever the switch says
+    // (PluginRegistry._DevPaths): they show even with it off.
+    const envFolders = dev?.folders.filter((f) => f.from_env) ?? [];
+    const shownFolders = dev?.enabled ? dev.folders : envFolders;
+
     return (
         <CardFrame title={i18n.t("plugins_dev_title")}>
             <FormControlLabel
@@ -119,14 +124,20 @@ export default function DevSection({api, onChanged, onError}: {
                                  inputProps={{"aria-label":
                                      i18n.t("plugins_dev_toggle")}}
                                  onChange={() => void toggle()}/>}/>
-            {dev?.enabled ? (
+            {dev && (dev.enabled || envFolders.length > 0) ? (
                 <Stack spacing={1} data-testid="plugin-dev-folders">
-                    {dev.folders.map((folder) => (
+                    {shownFolders.map((folder) => (
                         <Stack key={folder.id} direction="row" spacing={1}
                                alignItems="center">
                             <Typography variant="body2" sx={{flex: 1}}>
                                 {folder.name}
                             </Typography>
+                            {folder.from_env ? (
+                                <Typography variant="caption"
+                                            color="text.secondary">
+                                    {i18n.t("plugins_dev_from_env")}
+                                </Typography>
+                            ) : null}
                             {folder.from_env ? null : (
                                 <Button size="small" color="error"
                                         onClick={() => void remove(folder.id)}>
@@ -135,14 +146,16 @@ export default function DevSection({api, onChanged, onError}: {
                             )}
                         </Stack>
                     ))}
-                    <div>
-                        <Button size="small" variant="outlined"
-                                disabled={picking}
-                                data-testid="plugin-dev-add"
-                                onClick={() => void addFolder()}>
-                            {i18n.t("plugins_dev_add")}
-                        </Button>
-                    </div>
+                    {dev.enabled ? (
+                        <div>
+                            <Button size="small" variant="outlined"
+                                    disabled={picking}
+                                    data-testid="plugin-dev-add"
+                                    onClick={() => void addFolder()}>
+                                {i18n.t("plugins_dev_add")}
+                            </Button>
+                        </div>
+                    ) : null}
                 </Stack>
             ) : null}
             <Dialog open={asking !== null} onClose={() => void answer(false)}>

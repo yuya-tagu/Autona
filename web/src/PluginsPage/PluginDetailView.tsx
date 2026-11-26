@@ -33,6 +33,24 @@ import RunView, {
 // The built-in vodsplit (ADR-009 D9): its page is the archive page (D4).
 const BUILTIN_VODSPLIT_ID = "taguyan.vodsplit";
 
+// A time limit in the largest unit that reads well: seconds under a minute,
+// minutes under an hour (a remainder of seconds is dropped), else hours and
+// the remaining minutes.
+export function timeoutText(seconds: number): string {
+    if (seconds < 60) {
+        return i18n.t("plugins_timeout_seconds", {seconds});
+    }
+    const minutes = Math.floor(seconds / 60);
+    if (seconds < 3600) {
+        return i18n.t("plugins_timeout_minutes", {minutes});
+    }
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest === 0
+        ? i18n.t("plugins_timeout_hours", {hours})
+        : i18n.t("plugins_timeout_hours_minutes", {hours, minutes: rest});
+}
+
 function pickFailed(onError: (text: string) => void) {
     return (error: unknown) => {
         const text = pickErrorText(error);
@@ -86,8 +104,7 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
                         data-testid={`plugin-timeout-${job.id}`}>
                 {job.timeout_seconds === null
                     ? i18n.t("plugins_timeout_none")
-                    : i18n.t("plugins_timeout_seconds",
-                             {seconds: job.timeout_seconds})}
+                    : timeoutText(job.timeout_seconds)}
             </Typography>
             {manual ? (
                 <>
@@ -406,7 +423,8 @@ export default function PluginDetailView({api, id, language, onChanged,
                             {i18n.t("plugins_funding")}
                         </Button>
                     ) : null}
-                    {plugin.id === BUILTIN_VODSPLIT_ID ? (
+                    {plugin.badge === "builtin"
+                        && plugin.id === BUILTIN_VODSPLIT_ID ? (
                         <Button size="small" variant="contained"
                                 data-testid="plugin-open-archive"
                                 onClick={() => navigateToPanel("archive")}>

@@ -79,8 +79,9 @@ export interface PluginsApi {
 
 const BASE = "/api/v1/plugins";
 
-// :reload runs describe, which the host gives up on after 60 s.
-export const RELOAD_TIMEOUT_MS = 75000;
+// :reload runs describe, which the host gives up on after 60 s
+// (contract_1.json describe_timeout_seconds): wait well beyond it.
+export const RELOAD_TIMEOUT_MS = 90000;
 
 function enc(part: string): string {
     return encodeURIComponent(part);

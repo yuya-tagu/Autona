@@ -26,7 +26,7 @@ export function refusalText(error: unknown): string {
         // empty (or text the page does not show).
         const detail = String(
             (error as {detail?: string} | null)?.detail ?? "").trim();
-        if (/^\d+$/.test(detail)) {
+        if (/^\d+$/.test(detail) && Number(detail) > 0) {
             return i18n.t("plugins_refuse_busy_left", {seconds: detail});
         }
     }

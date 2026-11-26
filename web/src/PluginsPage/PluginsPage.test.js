@@ -21,6 +21,7 @@ import {
     validateField,
 } from "./formFields";
 import {pickErrorText, refusalText} from "./RunView";
+import {timeoutText} from "./PluginDetailView";
 
 // The plugins page (ADR-009 D4) against the in-memory mock API. The shell
 // probe is stubbed: the page is shown as the desktop's shared view.
@@ -559,6 +560,30 @@ describe("wiring (I1b)", () => {
             .toHaveLength(1);
     });
 
+    test("a dev folder from the environment shows with the switch off",
+         async () => {
+             const api = createMockPluginsApi();
+             jest.spyOn(api, "dev").mockResolvedValue({
+                 enabled: false, folders: [
+                     {id: "aaaaaaaaaaaa", name: "FromEnv", from_env: true},
+                     {id: "bbbbbbbbbbbb", name: "Mine"}]});
+             show(api);
+             const list = await screen.findByTestId("plugin-dev-folders");
+             expect(within(list).getByText("FromEnv")).toBeTruthy();
+             expect(within(list).getByText("from the environment"))
+                 .toBeTruthy();
+             expect(within(list).queryByText("Mine")).toBeNull();
+             expect(within(list).queryByRole("button")).toBeNull();
+         });
+
+    test("time limits read in the largest fitting unit", () => {
+        expect(timeoutText(30)).toBe("Time limit: 30 s");
+        expect(timeoutText(60)).toBe("Time limit: 1 min");
+        expect(timeoutText(150)).toBe("Time limit: 2 min");
+        expect(timeoutText(3600)).toBe("Time limit: 1 h");
+        expect(timeoutText(5400)).toBe("Time limit: 1 h 30 min");
+    });
+
     test("a job without a time limit says so", async () => {
         const api = createMockPluginsApi();
         const detail = await api.detail(WEBHOOK);
@@ -569,6 +594,23 @@ describe("wiring (I1b)", () => {
             .textContent).toBe("No time limit");
         expect(screen.getByTestId(`plugin-timeout-${detail.jobs[1].id}`)
             .textContent).toBe("Time limit: 30 s");
+    });
+
+    test("only the built-in vodsplit has the open button", async () => {
+        for (const [id, badge] of [["taguyan.vodsplit", "listed"],
+                                   ["me.other", "builtin"]]) {
+            cleanup();
+            const api = createMockPluginsApi();
+            const detail = {...(await api.detail(WEBHOOK)), id, badge};
+            const list = await api.list();
+            jest.spyOn(api, "list").mockResolvedValue(
+                [{...list[0], id, badge}]);
+            jest.spyOn(api, "detail").mockResolvedValue(detail);
+            show(api);
+            fireEvent.click(await screen.findByTestId(`plugin-row-${id}`));
+            await screen.findByTestId("plugin-detail");
+            expect(screen.queryByTestId("plugin-open-archive")).toBeNull();
+        }
     });
 
     test("the built-in vodsplit opens the archive page", async () => {
@@ -682,7 +724,7 @@ describe("refusals and access", () => {
          });
 
     test("a busy refusal without seconds says it without them", () => {
-        for (const detail of [undefined, "", "soon"]) {
+        for (const detail of [undefined, "", "soon", "0"]) {
             expect(refusalText(refused(409, {reason: "busy", detail})))
                 .toBe("Wait until the running job ends, then try again.");
         }
