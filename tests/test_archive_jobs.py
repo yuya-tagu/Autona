@@ -29,6 +29,7 @@ from src.core import ArchiveReview as review
 from src.core import ArchiveTemplates as templates
 from src.core import ArchiveWorker as worker
 from src.core import PluginRunner as runner_module
+from src.core import PluginTypes as types_module
 from src.core import WebAccess
 from src.core.ArchiveJobService import ArchiveError, ArchiveJobService
 from src.core.PluginJobs import PluginJobs
@@ -86,16 +87,41 @@ def _normal_priority(monkeypatch):
 
 def _lanes(tmp_path, freed=None):
     """A PluginJobs of the lanes alone (Claim / Release / BusyFor use no
-    collaborator); `freed` gets each lane onLaneFreed names."""
+    collaborator); `freed` (a list, or a callable: onLaneFreed itself) gets
+    each lane onLaneFreed names."""
     return PluginJobs(
         runner=None, registry=None, inputs=None, settings=None, secrets=None,
         workDir=lambda: str(tmp_path), userDataDir=str(tmp_path),
         hostVersion="", locale=lambda: "ja", apiUrl=lambda: None,
         onRunEnded=lambda record: None,
-        onLaneFreed=(freed.append if freed is not None
+        onLaneFreed=(freed if callable(freed)
+                     else freed.append if freed is not None
                      else lambda lane: None),
         clock=lambda: datetime.datetime.now().astimezone(),
         host={"pid": os.getpid(), "started": None})
+
+
+def _watched_lanes(service, tmp_path):
+    """_lanes for `service` -> (lanes, freed, held): `freed` the lanes
+    onLaneFreed named, `held` for each Release and onLaneFreed whether its
+    thread held the service's _lock then (PluginJobs: both outside every
+    lock)."""
+    freed, held = [], []
+
+    def onFreed(lane):
+        held.append(service._lock._is_owned())
+        freed.append(lane)
+
+    lanes = _lanes(tmp_path, onFreed)
+    release = lanes.Release
+
+    def watched(lane, plugin):
+        held.append(service._lock._is_owned())
+        return release(lane, plugin)
+
+    lanes.Release = watched
+    service._lanes = lanes
+    return lanes, freed, held
 
 
 @pytest.fixture
@@ -683,7 +709,7 @@ def test_a_start_is_busy_while_a_plugin_holds_the_heavy_lane(
 
 def test_a_refused_start_gives_the_heavy_lane_back(service, work, fake,
                                                    tmp_path):
-    lanes = service._lanes = _lanes(tmp_path)
+    lanes, freed, held = _watched_lanes(service, tmp_path)
     work.mkdir(parents=True)
     (work / "blocked").write_text("a file, not a folder", encoding="utf-8")
     SettingsManager.settings["archive"] = {"work_dir": str(work / "blocked")}
@@ -691,6 +717,150 @@ def test_a_refused_start_gives_the_heavy_lane_back(service, work, fake,
         service.Create(SOURCE)
     assert refused.value.code == archive.WORK_DIR_UNUSABLE
     assert lanes.BusyFor(Lane.HEAVY) is None
+    # Given back outside the service's lock (PluginJobs' contract).
+    assert freed == [Lane.HEAVY] and held == [False, False]
+
+
+def _stopped(work):
+    """A cancelled job on SOURCE -> its id."""
+    jobId = "20261116-130000-cd34"
+    _stored(work, jobId, source=SOURCE)
+    return jobId
+
+
+GONE_ID = "20261116-140000-zz99"
+
+
+def _refusal_case(case, service, work, tmp_path):
+    """A start of `case` that its own job refuses -> (the start, its code).
+    """
+    if case == "resume_done":
+        _done(work, tmp_path)
+        return lambda: service.Resume(DONE_ID), archive.ALREADY_DONE
+    if case == "resume_gone":
+        return lambda: service.Resume(GONE_ID), archive.NOT_FOUND
+    if case == "reanalyze_no_video":
+        _done(work, tmp_path).unlink()
+        return (lambda: service.Reanalyze(DONE_ID, RESULTS),
+                archive.SOURCE_UNUSABLE)
+    if case == "export_gone":
+        return lambda: service.StartExport(GONE_ID), archive.NOT_FOUND
+    assert case == "export_not_done"
+    return lambda: service.StartExport(_stopped(work)), archive.NOT_DONE
+
+
+@pytest.mark.parametrize("case", [
+    "resume_done", "resume_gone", "reanalyze_no_video", "export_gone",
+    "export_not_done"])
+def test_a_jobs_own_refusal_comes_before_the_heavy_lanes_busy(
+        service, work, fake, tmp_path, case):
+    # Gone, done, not done, its video gone: said as such while a plugin
+    # holds the heavy lane, and the lane is never taken for it.
+    lanes, freed, held = _watched_lanes(service, tmp_path)
+    start, code = _refusal_case(case, service, work, tmp_path)
+    assert lanes.Claim(Lane.HEAVY, "someone.plugin")
+    _refused(code, start)
+    assert lanes.Running("someone.plugin")
+    assert not lanes.Running(archive.BUILTIN_PLUGIN_ID)
+    lanes.Release(Lane.HEAVY, "someone.plugin")
+    del freed[:], held[:]
+    _refused(code, start)
+    assert lanes.BusyFor(Lane.HEAVY) is None and freed == [] and held == []
+
+
+@pytest.mark.parametrize("kind", ["resume", "reanalyze", "export"])
+def test_a_start_refused_after_its_claim_gives_the_heavy_lane_back(
+        service, work, fake, tmp_path, monkeypatch, kind):
+    # What fails once the lane is taken (here the templates cannot be
+    # written) gives it back, outside the service's lock; nothing runs.
+    lanes, freed, held = _watched_lanes(service, tmp_path)
+    if kind == "resume":
+        jobId = _stopped(work)
+        start = lambda: service.Resume(jobId)  # noqa: E731
+    else:
+        _done(work, tmp_path)
+        jobId = DONE_ID
+        if kind == "reanalyze":
+            start = lambda: service.Reanalyze(jobId, RESULTS)  # noqa: E731
+        else:
+            service.SaveReview(jobId, {"sets": {"1": {"confirmed": True}}})
+            start = lambda: service.StartExport(jobId)  # noqa: E731
+    before = _disk(work, jobId)
+
+    def unwritable(*args):
+        raise OSError(13, "templates refused in this test")
+
+    monkeypatch.setattr(service, "_WriteTemplates", unwritable)
+    _refused(archive.WORK_DIR_UNUSABLE, start)
+    assert service._run is None
+    assert lanes.BusyFor(Lane.HEAVY) is None
+    assert freed == [Lane.HEAVY] and held == [False, False]
+    assert _disk(work, jobId) == before
+
+
+def test_a_runs_end_gives_the_heavy_lane_back_outside_the_lock(
+        service, work, fake, tmp_path):
+    lanes, freed, held = _watched_lanes(service, tmp_path)
+    jobId = service.Create(SOURCE)["id"]
+    assert _ended(service, jobId)["state"] == "done"
+    _until(lambda: freed, "the lane to be freed")
+    assert freed == [Lane.HEAVY] and held == [False, False]
+
+
+def test_the_shutdown_gives_the_heavy_lane_back_and_the_job_resumes(
+        service, work, fake, tmp_path):
+    lanes, freed, held = _watched_lanes(service, tmp_path)
+    _mode(fake, "slow")
+    jobId = service.Create(SOURCE)["id"]
+    _running_with_progress(service, jobId)
+    service.Shutdown(5.0)
+    assert freed == [Lane.HEAVY] and held == [False, False]
+    assert lanes.BusyFor(Lane.HEAVY) is None
+    assert _disk(work, jobId)["state"] == "cancelled"
+    # The next Autona resumes it.
+    _mode(fake, "ok")
+    again = ArchiveJobService(lanes=lanes)
+    try:
+        assert again.Resume(jobId)["state"] == "running"
+        assert _ended(again, jobId)["state"] == "done"
+    finally:
+        again.Shutdown(5.0)
+    _until(lambda: len(freed) == 2, "the lane to be freed again")
+
+
+def test_a_long_worker_log_is_turned_over_before_a_run(
+        service, work, fake, monkeypatch):
+    # Every run of a job appends to its worker.log, and the runner drops
+    # what comes past its limit: one at half of it becomes worker.log.1
+    # (one generation) before a run, and a failure's tail is this run's.
+    monkeypatch.setattr(types_module, "WORKER_LOG_MAX_BYTES", 4096)
+    jobId = _stopped(work)
+    log = work / jobId / "worker.log"
+    old = log.with_name("worker.log.1")
+    filler = "an earlier run's line\n" * 200
+    log.write_text(filler, encoding="utf-8")
+    _mode(fake, "crash")
+    service.Resume(jobId)
+    ended = _ended(service, jobId)
+    assert ended["state"] == "failed"
+    assert "RuntimeError: fake crash" in ended["error"]["message"]
+    assert "an earlier run's line" not in ended["error"]["message"]
+    assert old.read_text(encoding="utf-8") == filler
+    first = log.read_text(encoding="utf-8")
+    assert first.startswith("--- ") and "an earlier run's line" not in first
+    # Short: appended to, worker.log.1 kept.
+    service.Resume(jobId)
+    _ended(service, jobId)
+    assert log.read_text(encoding="utf-8").startswith(first)
+    assert log.read_text(encoding="utf-8").count(" start ---") == 2
+    assert old.read_text(encoding="utf-8") == filler
+    # Long again: it replaces worker.log.1.
+    second = "a later run's line\n" * 200
+    log.write_text(second, encoding="utf-8")
+    service.Resume(jobId)
+    _ended(service, jobId)
+    assert old.read_text(encoding="utf-8") == second
+    assert log.read_text(encoding="utf-8").count(" start ---") == 1
 
 
 @pytest.mark.parametrize("cause", ["popen", "job_object"])

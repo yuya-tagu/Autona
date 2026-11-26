@@ -677,7 +677,8 @@ def test_the_patterns_versions_and_environment_are_the_contracts():
     assert env == R.BuildEnvironment(
         os.environ, pluginDir=ArchiveWorker.WorkerDir(), protocol=None,
         secrets={}, apiUrl=None)
-    assert (env[T.ENV_PYTHONIOENCODING], env[T.ENV_PYINSTALLER_RESET])         == ("utf-8", "1")
+    assert (env[T.ENV_PYTHONIOENCODING], env[T.ENV_PYINSTALLER_RESET]) \
+        == ("utf-8", "1")
 
 
 def test_the_limits_are_the_contracts():

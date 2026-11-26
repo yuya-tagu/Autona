@@ -641,6 +641,28 @@ def test_a_launch_that_fails_otherwise_is_launch_failed(runner, tmp_path):
 
 
 @windows
+def test_a_launch_failure_says_why_on_the_handle_and_the_outcome(runner,
+                                                                 tmp_path):
+    # A caller learns why without reading worker.log (the built-in
+    # vodsplit's page shows it); a run that started has no launch error.
+    def popen(*args, **kwargs):
+        raise OSError(2, "no such worker in this test")
+
+    spec = _spec(tmp_path / "failed")
+    got = _Collect()
+    handle = R.PluginRunner(popen=popen).Start(spec, got.onEvent, got.onEnd)
+    assert handle.pid is None
+    assert "no such worker in this test" in handle.launch_error
+    outcome = handle.Wait(LONG)
+    assert outcome.launch_error == handle.launch_error
+    log = Path(spec.log_path).read_text(encoding="utf-8")
+    assert f"--- could not start: {handle.launch_error} ---" in log
+    started = runner.Start(_spec(tmp_path / "ok"), got.onEvent, got.onEnd)
+    assert started.launch_error is None
+    assert started.Wait(LONG).launch_error is None
+
+
+@windows
 def test_the_light_lanes_memory_limit_is_enforced_and_named(runner,
                                                             tmp_path):
     grow = ("import sys\nheld = []\n"

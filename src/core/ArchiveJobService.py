@@ -27,7 +27,8 @@ default, never under user_data/: the videos are large and the operator's):
   sets.json's ``thumb``), a matched set's title and description
   ``NN_<title>.txt``, and its analysis cache ``.cache``);
 - ``<work>/<id>/worker.log``: the worker's stderr and what it printed on
-  stdout that is not a JSON line, appended by this process alone;
+  stdout that is not a JSON line, appended by this process alone (one at
+  half the runner's limit becomes ``worker.log.1`` before a run);
 - ``<work>/<id>/review.json``: the operator's review of the sets (ADR-006
   A4: confirmed, IN / OUT, which result; core/ArchiveReview.py), written
   whole when the page saves it;
@@ -216,8 +217,9 @@ runs in memory, the probe's cache and the swept work folders;
 Windows an os.replace fails while another thread has the file open); taken
 in that order. ArchiveTemplates' lock is never taken under them (the
 templates are read before), ``_titlesLock`` (the preview that runs) alone.
-PluginJobs' lock is a leaf below ``_lock`` (the Claim, a refused start's
-Release); a run's end releases the lane outside ``_lock``.
+PluginJobs' lock is a leaf below ``_lock`` (the Claim); every Release --
+a refused start's, a run's end -- is outside ``_lock`` (it calls
+PluginJobs' onLaneFreed, outside every lock).
 The version probe (up to
 ``ArchiveWorker.PROBE_TIMEOUT_SECS``) runs under its own lock, never under
 ``_lock``; a request waits for one probe at most (the web client's timeout
@@ -266,6 +268,8 @@ JOB_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[a-z0-9]{4}")
 JOB_FILE = "job.json"
 RESULTS_FILE = "results.json"
 LOG_FILE = "worker.log"
+# worker.log's one older generation (_TurnOverLog).
+LOG_OLD_SUFFIX = ".1"
 OUT_DIR = "out"
 SETS_FILE = "sets.json"
 # The worker's analysis cache in out/ (vodsplit's default for --cache).
@@ -317,9 +321,6 @@ _KILL_WAIT_SECS = 2
 # The built-in plugin a job's run is (ADR-009 D9): the owner of the heavy
 # lane it claims from PluginJobs.
 BUILTIN_PLUGIN_ID = "taguyan.vodsplit"
-# The line PluginRunner.Start appends to worker.log when it could not start
-# the process: ``--- could not start: <why> ---``.
-_LAUNCH_NOTE = "--- could not start: "
 
 _REPLACE_ATTEMPTS = 4
 _REPLACE_BACKOFF = 0.05
@@ -1654,17 +1655,19 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse(export=True)
-                lanes = self._ClaimLane()
-                run = None
-                try:
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse(export=True)
+                    # The job's own refusals (gone, not done ...) before
+                    # the heavy lane's BUSY.
                     record = self._DiskRecord(jobDir, jobId)
                     if record is None:
                         raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
                     request = self._ExportRequest(workDir, jobDir, record)
+                    lanes = self._ClaimLane()
                     record["export"] = {
                         "state": "running", "started_at": _Now(),
                         "finished_at": None, "exit_code": None, "error": None,
@@ -1686,10 +1689,10 @@ class ArchiveJobService:
                     logger.info(f"Archive: job {jobId} export started "
                                 f"({len(request['sets'])} sets)")
                     self._Start(run, probe, arguments, lanes)
-                except BaseException:
-                    self._GiveLaneBack(lanes, run)
-                    raise
-                return self._RunView(jobId)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     # ── the titles' preview (ADR-006 A6) ───────────────────────────────
 
@@ -2231,13 +2234,13 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse()
-                lanes = self._ClaimLane()
-                run = None
-                try:
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse()
+                    lanes = self._ClaimLane()
                     workDir = self.WorkDir()
                     try:
                         os.makedirs(workDir, exist_ok=True)
@@ -2272,10 +2275,10 @@ class ArchiveJobService:
                                            f"作業フォルダに書けません: {error}")
                     logger.info(f"Archive: job {jobId} created")
                     self._Start(run, probe, arguments, lanes)
-                except BaseException:
-                    self._GiveLaneBack(lanes, run)
-                    raise
-                return self._RunView(jobId)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     def Resume(self, jobId):
         """Run job `jobId` again (the worker resumes from its caches) ->
@@ -2318,16 +2321,18 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse()
-                lanes = self._ClaimLane()
-                run = None
-                try:
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse()
+                    # The job's own refusals (gone, done, its video gone
+                    # ...) before the heavy lane's BUSY.
                     record = self._Rerunnable(jobDir, jobId, reanalysis)
                     record["source"] = self._ResumableSource(record,
                                                              reanalysis)
+                    lanes = self._ClaimLane()
                     record.update(state="running", finished_at=None,
                                   exit_code=None, sets=None,
                                   needs_review=None, error=None, warnings=[],
@@ -2379,10 +2384,10 @@ class ArchiveJobService:
                     else:
                         logger.info(f"Archive: job {jobId} resumed")
                     self._Start(run, probe, arguments, lanes)
-                except BaseException:
-                    self._GiveLaneBack(lanes, run)
-                    raise
-                return self._RunView(jobId)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     def _DiscardResultsSwap(self, jobDir, pending, final, previous, swapped):
         """A reanalysis that failed before job.json was written: remove the
@@ -2640,9 +2645,10 @@ class ArchiveJobService:
 
     @staticmethod
     def _GiveLaneBack(lanes, run):
-        """A start refused after its claim (under _lock): the lane back,
-        unless the run it made started (its end gives it back). Never
-        raises."""
+        """A start refused after its claim: the lane back, unless the run
+        it made started (its end gives it back). Not under _lock (the
+        release calls PluginJobs' onLaneFreed, outside every lock of
+        theirs). Never raises."""
         if lanes is None or (run is not None and run.started):
             return
         try:
@@ -2675,6 +2681,7 @@ class ArchiveJobService:
         the job ends failed and ArchiveError(UNAVAILABLE) is raised (the
         caller gives the lane back)."""
         logPath = os.path.join(run.jobDir, LOG_FILE)
+        self._TurnOverLog(run, logPath)
         try:
             with open(logPath, "a", encoding="utf-8") as logFile:
                 what = "export start" if run.kind == EXPORT else "start"
@@ -2683,6 +2690,7 @@ class ArchiveJobService:
             logger.opt(exception=True).warning(
                 f"Archive: {LOG_FILE} of {run.record['id']} cannot be written")
         handle = None
+        detail = None
         runner = self._Runner()
         if runner is not None:
             try:
@@ -2690,14 +2698,16 @@ class ArchiveJobService:
                     ArchiveWorker.RunSpec(probe.command, arguments, logPath),
                     lambda event: self._OnEvent(run, event),
                     lambda outcome: self._Finish(run, outcome))
-            except Exception:
+            except Exception as error:
                 # The runner never raises; what made its spec may (the
                 # working directory gone).
+                detail = f"{type(error).__name__}: {error}"
                 logger.opt(exception=True).warning(
                     f"Archive: job {run.record['id']}: no launch")
         if handle is None or handle.pid is None or run.launchEnded:
             self._Forget()
-            detail = self._LaunchFailure(logPath)
+            if handle is not None:
+                detail = handle.launch_error
             message = (f"切り抜きワーカーを起動できません: {detail}" if detail
                        else "切り抜きワーカーを起動できません。")
             self._Settle(run, state="failed", finished_at=_Now(), error={
@@ -2719,19 +2729,21 @@ class ArchiveJobService:
                     f"{handle.pid})")
 
     @staticmethod
-    def _LaunchFailure(logPath):
-        """Why the runner could not start the worker: its note's text in
-        worker.log, or None."""
+    def _TurnOverLog(run, logPath):
+        """Before a run: a worker.log of half the runner's limit or more
+        (every run of the job appends to it; past the limit the runner
+        drops the rest) becomes worker.log.1 (one generation, replaced), so
+        a run always has room for its own lines. Never raises."""
         try:
-            with open(logPath, encoding="utf-8", errors="replace") as file:
-                lines = deque(file, maxlen=FAILURE_TAIL_LINES)
+            if os.path.getsize(logPath) < T.WORKER_LOG_MAX_BYTES // 2:
+                return
+            os.replace(logPath, logPath + LOG_OLD_SUFFIX)
+        except FileNotFoundError:
+            return
         except OSError:
-            return None
-        for line in reversed(lines):
-            line = line.strip()
-            if line.startswith(_LAUNCH_NOTE) and line.endswith(" ---"):
-                return line[len(_LAUNCH_NOTE):-len(" ---")] or None
-        return None
+            logger.opt(exception=True).warning(
+                f"Archive: {LOG_FILE} of {run.record['id']} could not be "
+                f"turned over")
 
     @staticmethod
     def _Settle(run, **end):
