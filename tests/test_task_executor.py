@@ -917,6 +917,9 @@ THREADS_LEFT = {
     # The match log's writer (ADR-006 A2): one, daemon, started with the
     # service; the observer hands it lines inside StateManager.lock.
     ("src/core/MatchLogService.py", "MatchLogService._StartWriter", "Thread"),
+    # The plugin hooks' dispatcher (ADR-009 E.1): one, daemon, started with
+    # it on the desktop; the triggers queue to it inside StateManager.lock.
+    ("src/core/PluginHooks.py", "PluginHooks._StartThread", "Thread"),
     # The updater's QThreads (auto-update is not touched). The asset
     # guide's two (the index fetch, the download) went in ADR-005 S-final
     # SF-3b: core's AssetPackService runs them as TaskExecutor jobs.
