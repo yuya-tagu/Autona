@@ -545,8 +545,14 @@ def isolated_settings(directory) -> dict:
 # does. Their parts are empty (each route answers 503) until the harness
 # hands them the bootstrapped ones (_autonaRuntime) or a web server is made.
 # Only when the blueprint has none: a second import of this module (as
-# another name) must not hand the routes empty parts again.
+# another name) must not hand the routes empty parts again. Skipped where
+# Flask is not installed (CI's web job runs the runtime contract test with
+# pytest alone): no test there can register the blueprint either.
 def _addPluginRoutes():
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        return
     from src import AutonaPluginApi
     from src.AutonaApiV1 import api_v1
     if getattr(api_v1, AutonaPluginApi._BOUND_ATTRIBUTE, None) is None:
