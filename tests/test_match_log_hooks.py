@@ -15,7 +15,8 @@ from src.core.PlayerService import PlayerService
 from src.core.PluginTypes import HookEvent
 from src.core.StateManager import StateManager
 from tests.test_match_log import (  # noqa: F401 (fixtures)
-    _Clock, _game, _Log, _match, _name, _reset, board)
+    _apply, _Clock, _game, _Log, _match, _name, _reset, board, desktop,
+    logged)
 
 
 class _Hooks:
@@ -23,9 +24,10 @@ class _Hooks:
     MatchCandidate / MatchWithdrawn): records each call, checking it comes
     holding StateManager.lock (the observer's)."""
 
-    def __init__(self, wanted=True, failing=False):
+    def __init__(self, wanted=True):
         self.wanted = wanted
-        self.failing = failing
+        # Which of the calls raise (a broken dispatcher).
+        self.failing = set()
         self.calls = []
         self.asked = 0
 
@@ -37,12 +39,14 @@ class _Hooks:
 
     def MatchCandidate(self, recordId, line):
         assert StateManager.lock._is_owned()
-        if self.failing:
+        if "candidate" in self.failing:
             raise RuntimeError("the dispatcher is broken")
         self.calls.append(("candidate", recordId, dict(line)))
 
     def MatchWithdrawn(self, recordId):
         assert StateManager.lock._is_owned()
+        if "withdrawn" in self.failing:
+            raise RuntimeError("the dispatcher is broken")
         self.calls.append(("withdrawn", recordId))
 
     def take(self):
@@ -277,13 +281,64 @@ def test_a_best_of_one_put_back_on_close_is_told_then(board, log, hooks):
     assert log.records()[0]["closed"] is True
 
 
-def test_the_close_tells_nothing(board, log, hooks):
-    _bestOf(3)
+def test_a_best_of_one_reset_then_the_close_tells_nothing(board, log, hooks):
+    # Known limit: the reset withdraws the candidate, and the close, no
+    # publish, does not tell the game it puts back.
+    _bestOf(1)
     _match()
     _game(1)
-    hooks.take()
+    [first] = hooks.take()
+    _reset()
+    assert hooks.take() == [("withdrawn", first[1])]
+
     log.service.Shutdown(5)
     assert hooks.take() == []
+    [record] = log.records()
+    assert (record["score"], record["closed"]) == ([1, 0], True)
+
+
+# ── the desktop's 反映, a big change ─────────────────────────────────────
+
+def test_the_desktop_s_apply_is_one_candidate(autonaApp, desktop, log, hooks):
+    # The best_of, the names and 2-0, all held: nothing told until 反映.
+    AutonaActions.instance.SetBestOf(1, 3)
+    _match()
+    _game(1)
+    _game(1)
+    assert StateManager.GetCommitted("score.1.team.1.score") == 0
+    assert hooks.take() == []
+
+    _apply(autonaApp)
+    [line] = log.records()
+    assert (line["score"], len(line["games"])) == ([2, 0], 2)
+    assert hooks.take() == [_candidate(log)]
+
+    # Nothing more applied: nothing more told.
+    _apply(autonaApp)
+    assert hooks.take() == []
+
+
+def test_a_big_change_is_one_candidate(board, log, hooks, monkeypatch):
+    channel = StateManager.observers.state_big_change
+    notify = channel.notify
+    told = []
+    monkeypatch.setattr(channel, "notify",
+                        lambda: (told.append(True), notify()))
+    StateManager.Set("matchLogProbe", {f"k{i}": 0 for i in range(120)})
+    try:
+        _match()
+        # More than 100 rows: no delta, the big change.
+        with StateManager.SaveBlock():
+            for i in range(120):
+                StateManager.Set(f"matchLogProbe.k{i}", 1)
+            AutonaActions.instance.SetBestOf(1, 3)
+            _game(1)
+            _game(1)
+    finally:
+        StateManager.Unset("matchLogProbe")
+
+    assert told
+    assert hooks.take() == [_candidate(log)]
 
 
 # ── what is not told ────────────────────────────────────────────────────
@@ -297,9 +352,35 @@ def test_no_wanted_hook_queues_no_candidate(board, log, hooks):
     _game(1, -1)
     _game(1)
     assert hooks.take() == []
+    # Asked as it became decided, each time.
     assert hooks.asked == 2
     # The log is the same.
     assert log.records()[-1]["score"] == [2, 0]
+
+
+def test_a_hook_enabled_later_does_not_fire_on_a_decided_match(
+        board, log, hooks):
+    hooks.wanted = False
+    _bestOf(5)
+    _match()
+    for _ in range(3):
+        _game(1)
+    assert hooks.asked == 1
+
+    # A hook enabled now: the match was decided before it.
+    hooks.wanted = True
+    _game(2)
+    assert AutonaActions.instance.SwapTeams(1)
+    assert AutonaActions.instance.SwapTeams(1)
+    # Not decided any more: nothing was told, nothing to withdraw.
+    _game(1, -1)
+    assert hooks.take() == []
+    assert hooks.asked == 1
+
+    # Decided again: asked again, and told.
+    _game(1)
+    assert hooks.asked == 2
+    assert hooks.take() == [_candidate(log)]
 
 
 def test_no_dispatcher_records_as_before(autonaApp, tmp_path, board):
@@ -316,7 +397,7 @@ def test_no_dispatcher_records_as_before(autonaApp, tmp_path, board):
 
 
 def test_a_failing_dispatcher_changes_nothing_in_the_log(board, log, hooks):
-    hooks.failing = True
+    hooks.failing = {"candidate", "withdrawn"}
     _bestOf(3)
     _match()
     _game(1)
@@ -324,6 +405,47 @@ def test_a_failing_dispatcher_changes_nothing_in_the_log(board, log, hooks):
     _game(2)
     assert [line["score"] for line in log.lines()] == [
         [1, 0], [2, 0], [2, 1]]
+
+
+def test_a_failed_candidate_is_told_with_the_next_publish(
+        board, log, hooks, logged):
+    hooks.failing = {"candidate"}
+    _bestOf(3)
+    _match()
+    _game(1)
+    _game(1)
+    assert hooks.take() == []
+    assert [line for line in logged
+            if "the hooks' dispatcher failed (RuntimeError)" in line]
+    assert not [line for line in logged if "ALPHA" in line]
+
+    # Mended: the next publish (one the record's line does not take in)
+    # tells it.
+    hooks.failing = set()
+    StateManager.Set("score.1.match", "Grand Final")
+    assert hooks.take() == [_candidate(log)]
+
+
+def test_a_failed_withdrawal_is_told_with_the_next_publish(
+        board, log, hooks, logged):
+    _bestOf(3)
+    _match()
+    _game(1)
+    _game(1)
+    [(_kind, recordId, _line)] = hooks.take()
+
+    hooks.failing = {"withdrawn"}
+    _game(1, -1)
+    assert hooks.take() == []
+    assert [line for line in logged
+            if "the hooks' dispatcher failed (RuntimeError)" in line]
+
+    hooks.failing = set()
+    StateManager.Set("score.1.match", "Grand Final")
+    assert hooks.take() == [("withdrawn", recordId)]
+    # Withdrawn once.
+    StateManager.Set("score.1.match", "Losers Final")
+    assert hooks.take() == []
 
 
 def test_board_2_is_not_judged(board, log, hooks):

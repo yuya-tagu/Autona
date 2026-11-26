@@ -113,13 +113,29 @@ and again with the new line each time its line changes while it stays
 decided (a game counted, the swap, a set-aside game put back on its
 close). A record no longer decided after a candidate (a game taken back,
 a larger ``best_of``) gets ``MatchWithdrawn(id)``. A record closing stays
-as it was (decided or not): closing withdraws nothing. A candidate is only
-told while ``Wanted(HookEvent.MATCH_DECIDED)`` is true (no enabled hook:
-nothing queued); a withdrawal is told whenever a candidate was. The wait
-before it fires and the "fired" mark are the dispatcher's, not this
-service's. Nothing is told on ``Shutdown`` (no publish). Known limit: a
-game set aside by a 1 -> 0 and put back when the record closes is told
-then, as the closed record's line with ``closed: false``.
+as it was (decided or not): closing withdraws nothing. Whether the
+candidate is told is asked once, when the record becomes decided:
+``Wanted(HookEvent.MATCH_DECIDED)`` false (no enabled hook) queues
+nothing, and the record counts as decided all the same -- no line
+replaced, no withdrawal, so a hook enabled later does not fire on a match
+long decided; it is asked again once the record has stopped being decided
+and becomes so again. The wait before it fires and the "fired" mark are
+the dispatcher's, not this service's. Nothing is told on ``Shutdown`` (no
+publish).
+
+Known limits:
+
+- A game set aside by a 1 -> 0 and put back when the record closes is
+  told then, as the closed record's line with ``closed: false``.
+- Another game loaded in the publish that closes the record clears its
+  characters (``ChangeGame``): that candidate's line has empty ``c1`` /
+  ``c2``.
+- A best-of-1's reset withdraws its candidate (a game taken back) until
+  the record closes; the shells' close (``Shutdown``) tells nothing, so a
+  best-of-1 reset and then the close never fires.
+- Not running headless (ADR-009 D.7) is the wiring's: ``bootstrap`` gives
+  the headless shell no ``hooks``; this service does not tell the shells
+  apart.
 
 What the dispatcher does with it is no part of the record: the line has
 been handed to the writer before, and a dispatcher that fails is logged
@@ -270,9 +286,11 @@ class _Record:
         # The content of the last line handed to the writer: None until the
         # record is first written.
         self.written = None
-        # The content of the line last told to the hooks as match_decided's
-        # candidate: None while no candidate stands.
+        # The content of the line it last was decided with (match_decided):
+        # None while it is not decided. `told`: whether the hooks were told
+        # (Wanted when it became decided).
         self.candidate = None
+        self.told = False
 
     def Name(self, side):
         return self.p1 if side == 1 else self.p2
@@ -611,13 +629,21 @@ class MatchLogService:
         try:
             if decided:
                 content = record.Content()
-                if (content != record.candidate
-                        and hooks.Wanted(HookEvent.MATCH_DECIDED)):
+                if content == record.candidate:
+                    return
+                # Asked once, as it becomes decided; a replaced line goes
+                # only where the first one went.
+                told = (record.told if record.candidate is not None
+                        else hooks.Wanted(HookEvent.MATCH_DECIDED))
+                if told:
                     hooks.MatchCandidate(record.id, record.Line(closed=False))
-                    record.candidate = content
+                # Marked once the call went through: a failed one is tried
+                # again with the next publish.
+                record.candidate, record.told = content, told
             elif record.candidate is not None:
-                record.candidate = None
-                hooks.MatchWithdrawn(record.id)
+                if record.told:
+                    hooks.MatchWithdrawn(record.id)
+                record.candidate, record.told = None, False
         except Exception as error:
             logger.warning(
                 f"match log: the hooks' dispatcher failed "
