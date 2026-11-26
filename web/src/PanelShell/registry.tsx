@@ -18,6 +18,7 @@ import ObsPage from "../GuidePages/ObsPage";
 import AboutPage from "../GuidePages/AboutPage";
 import AssetsPage from "../AssetsPage";
 import ArchivePage from "../ArchivePage";
+import PluginsPage from "../PluginsPage";
 
 // The React panels, by the name in their URL (/web/<panel>). Must name the
 // same panels as WEB_PANELS in src/core/WebAccess.py, which decides what the
@@ -31,7 +32,8 @@ import ArchivePage from "../ArchivePage";
 // (S4aa); "settings" 設定 (S4af: the Help & Settings menu's, not a sidebar
 // item); "api" / "companion" / "obs" the API reference & tester and the
 // Companion and OBS guides, "about" About Autona (S-final SF-4a-2: the
-// menu's too, the Qt windows until then); "assets" Add game assets (SF-4b-2).
+// menu's too, the Qt windows until then); "assets" Add game assets (SF-4b-2); "archive" the
+// archive clipper (ADR-006 A1); "plugins" the plugins page (ADR-009 D4).
 export const PANELS: Record<string, React.ComponentType> = {
     "shell-check": ShellCheckPage,
     "commentary": CommentaryPage,
@@ -52,6 +54,7 @@ export const PANELS: Record<string, React.ComponentType> = {
     "about": AboutPage,
     "assets": AssetsPage,
     "archive": ArchivePage,
+    "plugins": PluginsPage,
 };
 
 export function panelPage(panel: string): React.ComponentType | undefined {

@@ -79,6 +79,9 @@ export interface PluginsApi {
 
 const BASE = "/api/v1/plugins";
 
+// :reload runs describe, which the host gives up on after 60 s.
+export const RELOAD_TIMEOUT_MS = 75000;
+
 function enc(part: string): string {
     return encodeURIComponent(part);
 }
@@ -130,7 +133,9 @@ export const httpPluginsApi: PluginsApi = {
         await apiDelete(`${BASE}/dev/folders/${enc(folderId)}`);
     },
     reload: async (id) => {
-        await apiPost(`${BASE}/${enc(id)}:reload`);
+        // describe may take up to 60 s on the host: wait longer than that.
+        await apiPost(`${BASE}/${enc(id)}:reload`, undefined,
+                      {timeoutMs: RELOAD_TIMEOUT_MS});
     },
     pickFile: (extensions) => {
         const argument = pickFileArgument(extensions);

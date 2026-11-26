@@ -68,7 +68,8 @@ export interface PluginJob {
     id: string;
     title: PluginText;
     lane: "light" | "heavy";
-    timeout_seconds: number;
+    // null: no time limit (the built-in vodsplit only).
+    timeout_seconds: number | null;
     manual?: boolean;
     params?: PluginField[];
     actions?: {target: string; label: PluginText}[];
@@ -153,7 +154,8 @@ export interface InputChoice {
 
 export interface DevState {
     enabled: boolean;
-    folders: {id: string; name: string}[];
+    // from_env: AUTONA_PLUGIN_DEV's folder, which the page cannot remove.
+    folders: {id: string; name: string; from_env?: boolean}[];
 }
 
 // What a pick gave the page: the desktop's id and the name to show (never a

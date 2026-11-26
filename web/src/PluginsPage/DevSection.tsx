@@ -127,10 +127,12 @@ export default function DevSection({api, onChanged, onError}: {
                             <Typography variant="body2" sx={{flex: 1}}>
                                 {folder.name}
                             </Typography>
-                            <Button size="small" color="error"
-                                    onClick={() => void remove(folder.id)}>
-                                {i18n.t("plugins_dev_remove")}
-                            </Button>
+                            {folder.from_env ? null : (
+                                <Button size="small" color="error"
+                                        onClick={() => void remove(folder.id)}>
+                                    {i18n.t("plugins_dev_remove")}
+                                </Button>
+                            )}
                         </Stack>
                     ))}
                     <div>

@@ -93,7 +93,8 @@ NAVIGATION = [
 # /api/v1/archive/status) until A7, when its page began to install the
 # worker: it always shows, and no item requires anything.
 ADDED_ITEMS = {
-    3: [("archive", "scissors.svg", "app_archive", None)],
+    3: [("archive", "scissors.svg", "app_archive", None),
+        ("plugins", "list.svg", "app_plugins", None)],
 }
 
 # What the deleted Qt frame showed for its words, frozen from

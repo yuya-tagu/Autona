@@ -2,6 +2,7 @@ import React from "react";
 import {Alert, Box, Button, Chip, Stack, Typography} from "@mui/material";
 import i18n from "../i18n/config";
 import {CardFrame, Note} from "../GuidePages/parts";
+import {navigateToPanel} from "../PanelShell/hostApi";
 import {PluginsApi} from "./pluginsApi";
 import {
     PluginDetail,
@@ -28,6 +29,9 @@ import RunView, {
 // the running job's progress, the past jobs, and what it declares. The
 // hooks, the install and the listing are later stages' (P7 / P5): no place
 // is drawn for them yet.
+
+// The built-in vodsplit (ADR-009 D9): its page is the archive page (D4).
+const BUILTIN_VODSPLIT_ID = "taguyan.vodsplit";
 
 function pickFailed(onError: (text: string) => void) {
     return (error: unknown) => {
@@ -77,6 +81,13 @@ function JobCard({api, plugin, job, language, busy, onStart, onError}: {
                sx={{py: 1}}>
             <Typography variant="subtitle2">
                 {pluginText(job.title, language)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary"
+                        data-testid={`plugin-timeout-${job.id}`}>
+                {job.timeout_seconds === null
+                    ? i18n.t("plugins_timeout_none")
+                    : i18n.t("plugins_timeout_seconds",
+                             {seconds: job.timeout_seconds})}
             </Typography>
             {manual ? (
                 <>
@@ -393,6 +404,13 @@ export default function PluginDetailView({api, id, language, onChanged,
                                 data-testid="plugin-link-funding"
                                 onClick={() => link("funding")}>
                             {i18n.t("plugins_funding")}
+                        </Button>
+                    ) : null}
+                    {plugin.id === BUILTIN_VODSPLIT_ID ? (
+                        <Button size="small" variant="contained"
+                                data-testid="plugin-open-archive"
+                                onClick={() => navigateToPanel("archive")}>
+                            {i18n.t("plugins_open")}
                         </Button>
                     ) : null}
                     {plugin.badge === "dev" ? (

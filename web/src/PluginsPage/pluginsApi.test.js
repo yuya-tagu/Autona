@@ -21,6 +21,17 @@ beforeEach(() => {
     mockShellRequest.mockReset();
 });
 
+test("a reload waits longer than the host's 60 s describe", async () => {
+    const post = jest.spyOn(require("../api"), "apiPost")
+        .mockResolvedValue("");
+    await httpPluginsApi.reload("me.sandbox");
+    expect(post).toHaveBeenCalledWith(
+        "/api/v1/plugins/me.sandbox:reload", undefined,
+        {timeoutMs: 75000});
+    expect(75000).toBeGreaterThan(60000);
+    post.mockRestore();
+});
+
 test("a file is picked among the field's extensions, by id and name", async () => {
     mockShellRequest.mockResolvedValue(
         {ok: true, status: "picked", id: "p1", name: "logo.png"});
