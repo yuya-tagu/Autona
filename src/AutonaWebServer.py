@@ -170,6 +170,33 @@ def _build_web_app():
                 "Content-Security-Policy", WebAccess.FRAME_ANCESTORS)
         return response
 
+    # No redirect of a request that carries the shell's secret but to this
+    # origin's /api/v1/ (ADR-005 S-final SF-4a; WebAccess.ShellRedirect
+    # Refusal): QtWebEngine sends the next hop, the header with it, before
+    # the shared view's interceptor can block it. Any other is sent as
+    # SHELL_REDIRECT. Registered last, so it runs before log_response,
+    # frame_ancestors and CORS (Flask runs after_request in reverse): the 500
+    # is logged and carries the CSP and the CORS headers too. The log names
+    # the path and why, never the Location or the header.
+    @app.after_request
+    def shell_redirect(response):
+        if request.headers.get(WebAccess.SHELL_HEADER) is None:
+            return response
+        because = WebAccess.ShellRedirectRefusal(
+            response.status_code, response.headers.getlist("Location"),
+            request.url)
+        if because is None:
+            return response
+        refusal = WebAccess.SHELL_REDIRECT
+        WebServer._log_refusal(
+            ("shell_redirect", request.endpoint, because),
+            f"a redirect of {request.method} {request.path}", refusal,
+            because)
+        refused = jsonify(WebAccess.ErrorBody(refusal))
+        refused.status_code = refusal.status
+        refused.headers["Cache-Control"] = "no-store"
+        return refused
+
     # An operation this shell cannot run (ADR-005 S3c; a shell operation the
     # headless shell did not register, S3e-9): 503 in the /api/v1 error
     # shape, from every legacy route. /api/v1 answers it itself (its

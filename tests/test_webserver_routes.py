@@ -413,7 +413,8 @@ EXPECTED_EXTRA = {
     "socketio_exception_handlers": [],
     "before_request_funcs": {"None": ["guard_request", "log_request"]},
     "after_request_funcs": {
-        "None": ["cors_after_request", "frame_ancestors", "log_response"]},
+        "None": ["cors_after_request", "frame_ancestors", "log_response",
+                 "shell_redirect"]},
 }
 
 _DUMP_SCRIPT = r'''
