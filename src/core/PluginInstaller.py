@@ -7,10 +7,12 @@ Where things are
   stripped). Its install is staged in ``<id>.new/``, the folder it
   replaces kept in ``<id>.old/`` during the swap, a download written to
   ``<id>.part`` (ZipSafety's suffixes; ``Sweep`` cleans them at launch).
+- ``<app>/plugins/.upload-<16 hex>.part`` -- a manual zip's private copy
+  while it is prepared.
 - ``<user_data>/plugins/<id>/install.json`` -- the install record:
   ``{"source": {"kind", "repo_id"?, "name"?}, "version", "sha256",
-  "consent_digest", "installed_at"}`` (UTF-8, no BOM; written whole
-  through a temporary file inside the swap, so a record that cannot be
+  "consent_digest", "installed_at"}`` (UTF-8, no BOM; written through a
+  fsynced temporary file inside the swap, so a record that cannot be
   written puts the old folder back).
 
 An install (C.3) is two calls around the consent screen
@@ -23,11 +25,17 @@ raises) -> the blocklist -> unpack to ``<id>.new`` -> read plugin.json and
 screen shows, ``needs_consent``). Nothing of the plugin is started.
 
 ``Commit(pending)`` after consent (or the confirmation): not while the
-plugin runs (``jobs.Running``), the blocklist again, ``describe`` in the
-``.new`` folder (``runner.Describe`` then ``registry.JudgeDescribe``),
-for a NEW_INSTALL the secrets and the hooks forgotten, then the swap with
-install.json written inside it. ``Discard(pending)`` drops it (the
-consent refused). One install per id at a time (IN_PROGRESS).
+plugin runs (``jobs.Running``, asked again just before the swap), not when
+a dev folder took the id, the blocklist again, ``describe`` in the
+``.new`` folder (``runner.Describe`` then ``registry.JudgeDescribe``);
+for a NEW_INSTALL the hooks disabled and user_data/plugins/<id>/ emptied
+but install.json (secrets.bin, config.json, hooks.json and, when another
+source was recorded, data/: another source's zip inherits nothing, D7),
+for a changed digest the hooks
+disabled (RECONSENT, D.6); then the swap with install.json written inside
+it. ``Discard(pending)`` drops it (the consent refused). One install per
+id at a time (IN_PROGRESS); the free space is asked before a download, a
+copy and an unpacking (DISK_FULL).
 
 A manual zip's source is ``manual`` unless its SHA-256 equals the
 ``zip.sha256`` of the latest release descriptor of the repository recorded
@@ -59,6 +67,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import zipfile
@@ -95,6 +104,12 @@ SOURCE_MANUAL = "manual"
 # installs from (ADR-009 D7). Empty until the first official plugin's
 # repository exists (taguyan.webhook, after M2).
 OFFICIAL_REPO_IDS: frozenset = frozenset()
+
+# The built-in plugins: never removed by the installer (ADR-009 D9).
+BUILTIN_IDS: frozenset = frozenset({"taguyan.vodsplit"})
+
+# What a download, a copy or an unpacking leaves free on the drive.
+DISK_MARGIN_BYTES = 64 * 1024 * 1024
 
 # Remove's ``runs``.
 RUNS_DELETE = "delete"
@@ -133,6 +148,8 @@ REMOVE_FAILED = "remove_failed"
 SECRETS_FAILED = "secrets_failed"
 STOPPED = "stopped"
 INVALID_REQUEST = "invalid_request"
+DISK_FULL = "disk_full"
+BUILTIN = "builtin"
 
 _PLUGIN_ID = re.compile(PLUGIN_ID_PATTERN)
 _VERSION = re.compile(VERSION_PATTERN)
@@ -141,6 +158,8 @@ _GITHUB_REPO = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 _LEFTOVER = re.compile(
     r"^(" + PLUGIN_ID_PATTERN.strip("^$") + r")(\.new|\.old|\.part)$")
+_UPLOAD_PREFIX = ".upload-"
+_UPLOAD = re.compile(r"^\.upload-[0-9a-f]{16}\.part$")
 _COMPARISON = re.compile(r"^(<=|>=|<|>|=)\s*(\S+)$")
 _DIGEST_VERSION = 1
 _CHUNK = 1024 * 1024
@@ -224,11 +243,19 @@ def FileSha256(path: str) -> str:
 
 def _UrlPart(text: Any) -> bool:
     """A tag / zip name that can go into a URL path (C.1): no ``/``,
-    ``\\``, ``..``, ``%`` or control character."""
+    ``\\``, ``..``, ``%``, control character, and none of ``?``, ``#`` or
+    white space either (they would end or break the path)."""
     return (isinstance(text, str) and bool(text) and len(text) <= 200
-            and not any(ch in "/\\%" or ord(ch) < 32 or ord(ch) == 127
-                        for ch in text)
+            and not any(ch in "/\\%?#" or ord(ch) < 32 or ord(ch) == 127
+                        or ch.isspace() for ch in text)
             and ".." not in text)
+
+
+def _RepoName(name: Any) -> bool:
+    """``owner/repo`` as GitHub names them; a repo part ``.`` / ``..`` is
+    refused (it would climb in a URL)."""
+    return (isinstance(name, str) and bool(_GITHUB_REPO.fullmatch(name))
+            and name.split("/", 1)[1] not in (".", ".."))
 
 
 def _Int(value: Any) -> bool:
@@ -514,6 +541,9 @@ class PluginInstaller:
             version=data["version"], sha256=sha, consent_digest=digest)
 
     def _WriteRecord(self, pluginId: str, record: InstallRecord) -> None:
+        """install.json through ``.tmp``: written, flushed, fsynced, then
+        replaced (retried while an antivirus holds it); the ``.tmp`` is
+        removed when any step fails. Raises OSError."""
         path = self.InstallPath(pluginId)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         source = {"kind": record.source.kind}
@@ -526,9 +556,15 @@ class PluginInstaller:
                 "installed_at": datetime.fromtimestamp(self._clock())
                 .astimezone().isoformat(timespec="seconds")}
         temporary = path + ".tmp"
-        with open(temporary, "w", encoding="utf-8", newline="\n") as file:
-            json.dump(data, file, ensure_ascii=False, indent=2)
-        os.replace(temporary, path)
+        try:
+            with open(temporary, "w", encoding="utf-8", newline="\n") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+                file.flush()
+                os.fsync(file.fileno())
+            ZipSafety.Replace(temporary, path, sleep=self._sleep)
+        except BaseException:
+            self._RemoveFile(temporary)
+            raise
 
     # ── the Protocol's pure parts ──────────────────────────────────────
 
@@ -571,7 +607,8 @@ class PluginInstaller:
                  descriptor: Optional[Mapping[str, Any]]) -> Sequence[str]:
         """The zip's problems (C.1 / C.7; empty when fine), against the
         release descriptor when given (its own fields, the zip's size and
-        SHA-256, plugin.json's id and version)."""
+        SHA-256, plugin.json's id and version). Never raises for a zip it
+        cannot read: that is ZIP_UNREADABLE."""
         return self._Inspect(zipPath, descriptor)[0]
 
     def _Inspect(self, zipPath: str, descriptor: Optional[Mapping[str, Any]],
@@ -584,10 +621,11 @@ class PluginInstaller:
                 if code not in problems:
                     problems.append(code)
 
+        unreadable = [ZipSafety.ZIP_UNREADABLE], None, None, None
         try:
             size = os.path.getsize(zipPath)
         except OSError:
-            return [ZipSafety.ZIP_UNREADABLE], None, None, None
+            return unreadable
         if size > ZIP_MAX_BYTES:
             return [ZIP_TOO_LARGE], None, None, None
         if descriptor is not None:
@@ -598,13 +636,17 @@ class PluginInstaller:
                 try:
                     actual = sha or FileSha256(zipPath)
                 except OSError:
-                    return [ZipSafety.ZIP_UNREADABLE], None, None, None
+                    return unreadable
                 if actual != descriptor["zip"]["sha256"]:
                     add(SHA256_MISMATCH)
+        refused = ZipSafety.CheckCentralDirectory(zipPath,
+                                                  maxEntries=ZIP_MAX_ENTRIES)
+        if refused is not None:
+            add(refused)
+            return problems, None, None, None
         try:
             archive = zipfile.ZipFile(zipPath)
-        except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError,
-                ValueError, EOFError):
+        except (OSError,) + ZipSafety.READ_ERRORS:
             add(ZipSafety.ZIP_UNREADABLE)
             return problems, None, None, None
         with archive:
@@ -635,8 +677,10 @@ class PluginInstaller:
                 self._CheckEntry(raw.get("entry"), plan, pluginId, add)
             final = os.path.join(self.pluginsDir, pluginId)
             for root in (final, final + ZipSafety.NEW_SUFFIX):
-                if ZipSafety.LongestPath(root, plan.entries, strip=1) \
-                        > INSTALLED_PATH_MAX_LENGTH:
+                longestFile, longestFolder = ZipSafety.PathLengths(
+                    root, plan.entries, strip=1)
+                if longestFile > INSTALLED_PATH_MAX_LENGTH \
+                        or longestFolder > ZipSafety.MAX_FOLDER_PATH:
                     add(ZipSafety.PATH_TOO_LONG)
             return problems, plan, pluginId, raw
 
@@ -644,7 +688,7 @@ class PluginInstaller:
     def _ReadZipManifest(archive, plan, pluginId, add):
         """``<id>/plugin.json``'s object (utf-8-sig, at most
         MANIFEST_MAX_BYTES), or None (MANIFEST_MISSING /
-        MANIFEST_UNREADABLE added)."""
+        MANIFEST_UNREADABLE added: a damaged or unsupported entry too)."""
         for entry in plan.entries:
             if entry.parts == (pluginId, MANIFEST_FILE) and not entry.is_dir:
                 break
@@ -658,7 +702,7 @@ class PluginInstaller:
             with archive.open(entry.info) as file:
                 content = file.read(MANIFEST_MAX_BYTES + 1)
             data = json.loads(content.decode("utf-8-sig"))
-        except (zipfile.BadZipFile, EOFError, OSError, ValueError):
+        except (OSError,) + ZipSafety.READ_ERRORS:
             add(MANIFEST_UNREADABLE)
             return None
         if not isinstance(data, dict):
@@ -704,20 +748,32 @@ class PluginInstaller:
                 ZipSafety.RemoveTree(newDir)
         except OSError as error:
             logger.warning(f"Plugin install: a staged folder could not be "
-                           f"removed ({type(error).__name__}); removed at "
+                           f"removed ({ZipSafety.Why(error)}); removed at "
                            f"the next start")
+
+    def _RequireSpace(self, needed: int) -> None:
+        """DISK_FULL when the plugins folder's drive has not ``needed``
+        bytes and DISK_MARGIN_BYTES free (a stream's recording shares the
+        drive). Unknown free space is not a refusal."""
+        try:
+            free = shutil.disk_usage(self.pluginsDir).free
+        except OSError:
+            return
+        if free < needed + DISK_MARGIN_BYTES:
+            raise InstallError(DISK_FULL)
 
     def PrepareFromListing(self, repoId: int,
                            listedId: str) -> PendingInstall:
         """C.3 steps 1-4 for a listed plugin (``repoId`` and the listing's
-        id). Raises InstallError."""
+        id). A failed download keeps ``<id>.part`` for the next try (Sweep
+        removes it at the next launch). Raises InstallError."""
         _RequireId(listedId)
         if self._network is None or not (_Int(repoId) and repoId > 0):
             raise InstallError(NETWORK_FAILED if self._network is None
                                else INVALID_REQUEST)
         try:
             name = self._network.RepoName(repoId)
-            if not (isinstance(name, str) and _GITHUB_REPO.fullmatch(name)):
+            if not _RepoName(name):
                 raise ValueError("not a repository name")
             descriptor = ParseDescriptor(self._network.LatestDescriptor(name))
         except Exception as error:
@@ -728,19 +784,24 @@ class PluginInstaller:
         if descriptor["id"] != listedId:
             raise InstallError(BAD_ZIP, (ID_MISMATCH,))
         source = InstallSource(kind=SOURCE_GITHUB, repo_id=repoId, name=name)
-        version = descriptor["version"]
-        installed = self.ReadInstallRecord(listedId)
-        self._Refusals(listedId, version, None, source, installed)
         self._Reserve(listedId)
         part = os.path.join(self.pluginsDir,
                             listedId + ZipSafety.PART_SUFFIX)
+        keepPart = False
         try:
+            # Read under the reservation: no other install of the id ends
+            # between the record's read and the decision.
+            installed = self.ReadInstallRecord(listedId)
+            self._Refusals(listedId, descriptor["version"], None, source,
+                           installed)
             os.makedirs(self.pluginsDir, exist_ok=True)
+            self._RequireSpace(descriptor["zip"]["size"])
             try:
                 self._network.Download(name, descriptor["tag"],
                                        descriptor["zip"]["name"], part,
                                        descriptor["zip"]["size"])
             except Exception as error:
+                keepPart = True
                 raise InstallError(NETWORK_FAILED,
                                    detail=type(error).__name__) from None
             return self._Stage(part, descriptor, source, verified=True,
@@ -749,29 +810,54 @@ class PluginInstaller:
             self._Release(listedId)
             raise
         finally:
-            self._RemoveFile(part)
+            if not keepPart:
+                self._RemoveFile(part)
 
     def PrepareFromZip(self, zipPath: str) -> PendingInstall:
-        """C.3 steps 4- for a zip the user gave (the file stays where it
-        is). Raises InstallError."""
+        """C.3 steps 4- for a zip the user gave. It is first copied into a
+        private file in the plugins folder (its SHA-256 computed on the
+        way), and everything after reads that copy: the zip cannot change
+        between its hash and its unpacking. The user's file stays. Raises
+        InstallError."""
         try:
-            sha = FileSha256(zipPath)
+            size = os.path.getsize(zipPath)
         except OSError:
             raise InstallError(BAD_ZIP, (ZipSafety.ZIP_UNREADABLE,)) from None
-        problems, _plan, pluginId, raw = self._Inspect(zipPath, None, sha)
-        if problems:
-            raise InstallError(BAD_ZIP, problems)
-        installed = self.ReadInstallRecord(pluginId)
-        source, descriptor = self._MatchRelease(sha, pluginId, raw, installed)
-        self._Refusals(pluginId, raw.get("version"), sha, source, installed)
-        self._Reserve(pluginId)
+        if size > ZIP_MAX_BYTES:
+            raise InstallError(BAD_ZIP, (ZIP_TOO_LARGE,))
         try:
-            return self._Stage(zipPath, descriptor, source,
-                               verified=source.kind == SOURCE_GITHUB,
-                               installed=installed, sha=sha)
-        except BaseException:
-            self._Release(pluginId)
-            raise
+            os.makedirs(self.pluginsDir, exist_ok=True)
+        except OSError as error:
+            raise InstallError(EXTRACT_FAILED,
+                               detail=ZipSafety.Why(error)) from None
+        self._RequireSpace(size)
+        copy = os.path.join(self.pluginsDir,
+                            f"{_UPLOAD_PREFIX}{os.urandom(8).hex()}"
+                            f"{ZipSafety.PART_SUFFIX}")
+        try:
+            try:
+                sha = _CopyHashing(zipPath, copy, size)
+            except OSError:
+                raise InstallError(BAD_ZIP,
+                                   (ZipSafety.ZIP_UNREADABLE,)) from None
+            problems, _plan, pluginId, raw = self._Inspect(copy, None, sha)
+            if problems:
+                raise InstallError(BAD_ZIP, problems)
+            self._Reserve(pluginId)
+            try:
+                installed = self.ReadInstallRecord(pluginId)
+                source, descriptor = self._MatchRelease(sha, pluginId, raw,
+                                                        installed)
+                self._Refusals(pluginId, raw.get("version"), sha, source,
+                               installed)
+                return self._Stage(copy, descriptor, source,
+                                   verified=source.kind == SOURCE_GITHUB,
+                                   installed=installed, sha=sha)
+            except BaseException:
+                self._Release(pluginId)
+                raise
+        finally:
+            self._RemoveFile(copy)
 
     def _MatchRelease(self, sha, pluginId, raw, installed):
         """(source, descriptor) of a manual zip: the repository recorded
@@ -788,11 +874,10 @@ class PluginInstaller:
                 update = raw.get("update")
                 name = update.get("github") if isinstance(update, dict) \
                     else None
-                if not (isinstance(name, str) and _GITHUB_REPO.fullmatch(name)):
+                if not _RepoName(name):
                     return manual
                 repoId = self._network.RepoId(name)
-            if not (_Int(repoId) and repoId > 0 and isinstance(name, str)
-                    and _GITHUB_REPO.fullmatch(name)):
+            if not (_Int(repoId) and repoId > 0 and _RepoName(name)):
                 return manual
             descriptor = ParseDescriptor(self._network.LatestDescriptor(name))
         except Exception as error:
@@ -810,27 +895,8 @@ class PluginInstaller:
 
     def _Refusals(self, pluginId, version, sha, source, installed):
         """DecideSource's refusals and the blocklist, before anything is
-        written."""
-        decision = self.DecideSource(pluginId, installed, source,
-                                     version if isinstance(version, str)
-                                     else "",
-                                     devIdExists=self._isDevId(pluginId))
-        if decision in (InstallDecision.REFUSE_DEV_ID,
-                        InstallDecision.REFUSE_RESERVED):
-            raise InstallError(decision.value)
-        if BlockedBy(pluginId, version if isinstance(version, str) else "",
-                     sha, source.repo_id, self._blocklist()) is not None:
-            raise InstallError(BLOCKED)
-
-    def _Stage(self, zipPath, descriptor, source, *, verified, installed,
-               sha=None) -> PendingInstall:
-        """Check the zip (against ``descriptor``), unpack it to
-        ``<id>.new`` and check its manifest there. The id is reserved."""
-        sha = sha or FileSha256(zipPath)
-        problems, plan, pluginId, raw = self._Inspect(zipPath, descriptor, sha)
-        if problems:
-            raise InstallError(BAD_ZIP, problems)
-        version = raw.get("version")
+        written. Returns the decision."""
+        version = version if isinstance(version, str) else ""
         decision = self.DecideSource(pluginId, installed, source, version,
                                      devIdExists=self._isDevId(pluginId))
         if decision in (InstallDecision.REFUSE_DEV_ID,
@@ -839,40 +905,55 @@ class PluginInstaller:
         if BlockedBy(pluginId, version, sha, source.repo_id,
                      self._blocklist()) is not None:
             raise InstallError(BLOCKED)
+        return decision
+
+    def _Stage(self, zipPath, descriptor, source, *, verified, installed,
+               sha=None) -> PendingInstall:
+        """Check the zip (against ``descriptor``), unpack it to
+        ``<id>.new`` and check its manifest there. The id is reserved; the
+        staged folder is removed whatever fails after it was made."""
+        try:
+            zipBytes = os.path.getsize(zipPath)
+            sha = sha or FileSha256(zipPath)
+        except OSError:
+            raise InstallError(BAD_ZIP, (ZipSafety.ZIP_UNREADABLE,)) from None
+        problems, plan, pluginId, raw = self._Inspect(zipPath, descriptor, sha)
+        if problems:
+            raise InstallError(BAD_ZIP, problems)
+        decision = self._Refusals(pluginId, raw.get("version"), sha, source,
+                                  installed)
+        self._RequireSpace(plan.expanded_bytes)
         newDir = os.path.join(self.pluginsDir,
                               pluginId + ZipSafety.NEW_SUFFIX)
         self._RemoveNew(newDir)
         if os.path.lexists(newDir):
             raise InstallError(EXTRACT_FAILED)
         try:
-            with zipfile.ZipFile(zipPath) as archive:
-                ZipSafety.Extract(archive, plan.entries, newDir, strip=1,
-                                  step=self._stopping)
-        except ZipSafety.ZipStopped:
-            self._RemoveNew(newDir)
-            raise InstallError(STOPPED) from None
-        except (OSError, ValueError, EOFError, zipfile.BadZipFile,
-                zipfile.LargeZipFile) as error:
-            self._RemoveNew(newDir)
-            raise InstallError(EXTRACT_FAILED,
-                               detail=type(error).__name__) from None
-        try:
+            try:
+                with zipfile.ZipFile(zipPath) as archive:
+                    ZipSafety.Extract(archive, plan.entries, newDir, strip=1,
+                                      step=self._stopping)
+            except ZipSafety.ZipStopped:
+                raise InstallError(STOPPED) from None
+            except (OSError,) + ZipSafety.READ_ERRORS as error:
+                raise InstallError(EXTRACT_FAILED,
+                                   detail=ZipSafety.Why(error)) from None
             report = self._CheckManifest(newDir, pluginId, source)
+            manifest = report.manifest
+            digest = ConsentDigest(manifest, source)
+            pending = PendingInstall(
+                plugin_id=pluginId, version=manifest.version,
+                manifest=manifest, report=report, source=source,
+                verified=verified, sha256=sha, zip_bytes=zipBytes,
+                size_bytes=plan.expanded_bytes, decision=decision,
+                consent_digest=digest,
+                needs_consent=(decision == InstallDecision.NEW_INSTALL
+                               or installed is None
+                               or installed.consent_digest != digest),
+                installed=installed, new_dir=newDir)
         except BaseException:
             self._RemoveNew(newDir)
             raise
-        manifest = report.manifest
-        digest = ConsentDigest(manifest, source)
-        pending = PendingInstall(
-            plugin_id=pluginId, version=manifest.version, manifest=manifest,
-            report=report, source=source, verified=verified, sha256=sha,
-            zip_bytes=os.path.getsize(zipPath),
-            size_bytes=plan.expanded_bytes, decision=decision,
-            consent_digest=digest,
-            needs_consent=(decision == InstallDecision.NEW_INSTALL
-                           or installed is None
-                           or installed.consent_digest != digest),
-            installed=installed, new_dir=newDir)
         with self._lock:
             self._pending[pluginId] = pending
             self._busy.discard(pluginId)
@@ -927,13 +1008,14 @@ class PluginInstaller:
 
     def Commit(self, pending: PendingInstall) -> InstallRecord:
         """C.3 step 6 after consent: describe in ``.new`` -> swap ->
-        install.json. RUNNING (kept pending: press again once the run
-        ended) while a run of the plugin goes; BLOCKED, DESCRIBE_FAILED,
-        SWAP_FAILED drop the pending install. Raises InstallError."""
+        install.json. RUNNING while a run of the plugin goes -- asked first
+        and again just before the swap (PluginJobs holds no per-plugin
+        reservation) -- keeps the install pending: press again once the run
+        ended. Every other refusal drops it. Raises InstallError."""
         pluginId = pending.plugin_id
         # Asked outside the lock: another part's lock is never taken
         # inside this one.
-        if self._jobs is not None and self._jobs.Running(pluginId):
+        if self._Running(pluginId):
             raise InstallError(RUNNING)
         with self._lock:
             if self._pending.get(pluginId) is not pending:
@@ -944,14 +1026,27 @@ class PluginInstaller:
             del self._pending[pluginId]
         try:
             return self._Commit(pending)
+        except InstallError as error:
+            if error.code == RUNNING:
+                with self._lock:
+                    self._pending[pluginId] = pending
+            else:
+                self._RemoveNew(pending.new_dir)
+            raise
         except BaseException:
             self._RemoveNew(pending.new_dir)
             raise
         finally:
             self._Release(pluginId)
 
+    def _Running(self, pluginId: str) -> bool:
+        return self._jobs is not None and bool(self._jobs.Running(pluginId))
+
     def _Commit(self, pending: PendingInstall) -> InstallRecord:
         pluginId, manifest = pending.plugin_id, pending.manifest
+        if self._isDevId(pluginId):
+            # A dev folder added while consent was asked (D4).
+            raise InstallError(InstallDecision.REFUSE_DEV_ID.value)
         if BlockedBy(pluginId, pending.version, pending.sha256,
                      pending.source.repo_id, self._blocklist()) is not None:
             raise InstallError(BLOCKED)
@@ -962,11 +1057,22 @@ class PluginInstaller:
             logger.info(f"Plugin install: {pluginId}: describe failed "
                         f"({result.failure.value})")
             raise InstallError(DESCRIBE_FAILED, (result.failure.value,))
+        # describe took up to a minute: a run may have started since. Asked
+        # before anything of the old plugin is forgotten, so a RUNNING
+        # leaves it whole.
+        if self._Running(pluginId):
+            raise InstallError(RUNNING)
+        # Before the swap: another author's zip never meets the old
+        # plugin's secrets, values or enabled hooks, even if the swap fails.
         if pending.decision == InstallDecision.NEW_INSTALL:
-            # Before the swap: another author's zip never meets the old
-            # plugin's secrets or enabled hooks, even if the swap fails.
+            self._ForgetForNewInstall(
+                pluginId, keepData=pending.installed is None)
+        elif pending.installed is not None \
+                and pending.installed.consent_digest != pending.consent_digest \
+                and self._hooks is not None:
+            # Consent asked again (D.6): its hooks start disabled.
             try:
-                self._ForgetForNewInstall(pluginId)
+                self._hooks.Forget(pluginId, HookDisabledReason.RECONSENT)
             except OSError as error:
                 raise InstallError(SECRETS_FAILED,
                                    detail=type(error).__name__) from None
@@ -982,19 +1088,35 @@ class PluginInstaller:
                            sleep=self._sleep)
         except OSError as error:
             logger.warning(f"Plugin install: {pluginId}: the swap failed "
-                           f"({type(error).__name__})")
+                           f"({ZipSafety.Why(error)})")
             raise InstallError(SWAP_FAILED,
                                detail=type(error).__name__) from None
         logger.info(f"Plugin install: {pluginId} {pending.version} is in "
                     f"place")
         return record
 
-    def _ForgetForNewInstall(self, pluginId: str) -> None:
-        if self._hooks is not None:
-            self._hooks.Forget(pluginId, HookDisabledReason.NEW_INSTALL)
-        if self._secrets is not None:
-            self._secrets.Forget(pluginId, dev=False)
-        self._RemoveSecretsFile(pluginId)
+    def _ForgetForNewInstall(self, pluginId: str, *, keepData: bool) -> None:
+        """A new install: the hooks disabled, the secrets forgotten and
+        everything in user_data/plugins/<id>/ but install.json removed --
+        config.json, hooks.json's values, secrets.bin and, when another
+        source was recorded (``keepData`` false), data/. With no record
+        data/ stays: it is what a removal asked to keep, and nothing says
+        whose it was. install.json stays until the swap writes the new one
+        (a failed swap keeps the old plugin's record, which the blocklist
+        matches by). SECRETS_FAILED when it cannot."""
+        try:
+            if self._hooks is not None:
+                self._hooks.Forget(pluginId, HookDisabledReason.NEW_INSTALL)
+            if self._secrets is not None:
+                self._secrets.Forget(pluginId, dev=False)
+            self._RemoveSecretsFile(pluginId)
+            userDir = UserDir(self.userDataDir, pluginId, dev=False)
+            if os.path.isdir(userDir):
+                _RemoveChildren(userDir, keep=(INSTALL_FILE, DATA_DIR)
+                                if keepData else (INSTALL_FILE,))
+        except OSError as error:
+            raise InstallError(SECRETS_FAILED,
+                               detail=type(error).__name__) from None
 
     def _RemoveSecretsFile(self, pluginId: str) -> None:
         """secrets.bin gone, whatever PluginSecrets did. Raises OSError."""
@@ -1012,53 +1134,76 @@ class PluginInstaller:
         except FileNotFoundError:
             pass
         except OSError as error:
-            logger.warning(f"Plugin install: a download could not be "
-                           f"removed ({type(error).__name__}); removed at "
+            logger.warning(f"Plugin install: a temporary file could not be "
+                           f"removed ({ZipSafety.Why(error)}); removed at "
                            f"the next start")
 
     # ── removal and the launch's sweep ─────────────────────────────────
 
     def Remove(self, pluginId: str, *, data: bool, runs: str) -> None:
         """Remove an installed plugin (C.6): its hooks and secrets first
-        (secrets.bin always), its folder, its user_data folder (``data/``
-        kept unless ``data``), its runs' folders under the work folder
-        (``runs``: delete / keep_out -- each run's ``out/`` kept -- / keep).
-        RUNNING while a run of it goes (the caller cancels first);
-        NOT_FOUND when neither folder is there. Raises InstallError."""
+        (secrets.bin always), then -- after asking again that no run of it
+        goes -- what an install left (``<id>.new`` / ``.old`` / ``.part``:
+        an ``.old`` left would come back at the next launch's sweep), its
+        folder, its user_data folder (``data/`` kept unless ``data``; the
+        folder itself when nothing is left), its runs' folders under the
+        work folder (``runs``: delete / keep_out -- each run's ``out/``
+        kept -- / keep). BUILTIN for the built-in vodsplit; RUNNING while a
+        run of it goes (the caller cancels first); NOT_FOUND when nothing
+        of it is there; SECRETS_FAILED / REMOVE_FAILED. Raises
+        InstallError."""
         _RequireId(pluginId)
+        if pluginId in BUILTIN_IDS:
+            raise InstallError(BUILTIN)
         if runs not in _RUNS:
             raise InstallError(INVALID_REQUEST)
         folder = self.PluginDir(pluginId)
+        leftovers = [folder + suffix for suffix in (
+            ZipSafety.NEW_SUFFIX, ZipSafety.PART_SUFFIX, ZipSafety.OLD_SUFFIX)]
         userDir = UserDir(self.userDataDir, pluginId, dev=False)
-        if self._jobs is not None and self._jobs.Running(pluginId):
+        if self._Running(pluginId):
             raise InstallError(RUNNING)
         with self._lock:
             if pluginId in self._busy:
                 raise InstallError(IN_PROGRESS)
-            if not os.path.lexists(folder) and not os.path.lexists(userDir):
+            if not any(os.path.lexists(path)
+                       for path in [folder, userDir, *leftovers]):
                 raise InstallError(NOT_FOUND)
             self._busy.add(pluginId)
             stale = self._pending.pop(pluginId, None)
         try:
             if stale is not None:
                 self._RemoveNew(stale.new_dir)
-            if self._hooks is not None:
-                self._hooks.Forget(pluginId, HookDisabledReason.USER)
-            if self._secrets is not None:
-                self._secrets.Forget(pluginId, dev=False)
             try:
+                if self._hooks is not None:
+                    self._hooks.Forget(pluginId, HookDisabledReason.USER)
+                if self._secrets is not None:
+                    self._secrets.Forget(pluginId, dev=False)
                 self._RemoveSecretsFile(pluginId)
+            except OSError as error:
+                raise InstallError(SECRETS_FAILED,
+                                   detail=type(error).__name__) from None
+            if self._Running(pluginId):
+                raise InstallError(RUNNING)
+            try:
+                for path in leftovers:
+                    if os.path.isdir(path) and not os.path.islink(path):
+                        ZipSafety.RemoveTree(path)
+                    elif os.path.lexists(path):
+                        os.remove(path)
                 if os.path.lexists(folder):
                     ZipSafety.RemoveTree(folder)
                 if os.path.isdir(userDir):
                     if data:
                         ZipSafety.RemoveTree(userDir)
                     else:
-                        _RemoveChildren(userDir, keep=DATA_DIR)
+                        _RemoveChildren(userDir, keep=(DATA_DIR,))
+                        if not os.listdir(userDir):
+                            os.rmdir(userDir)
                 self._RemoveRuns(pluginId, runs)
             except OSError as error:
                 logger.warning(f"Plugin removal: {pluginId} was partly "
-                               f"removed ({type(error).__name__})")
+                               f"removed ({ZipSafety.Why(error)})")
                 raise InstallError(REMOVE_FAILED,
                                    detail=type(error).__name__) from None
         finally:
@@ -1078,20 +1223,29 @@ class PluginInstaller:
         for name in os.listdir(folder):
             path = os.path.join(folder, name)
             if os.path.isdir(path) and not os.path.islink(path):
-                _RemoveChildren(path, keep=OUT_DIR)
+                _RemoveChildren(path, keep=(OUT_DIR,))
             else:
                 os.remove(path)
 
     def Sweep(self) -> None:
         """At launch (E.2): what an install a crash ended left --
-        ``<id>.part`` and ``<id>.new`` removed, ``<id>.old`` put back when
-        ``<id>`` is missing, else removed. Logged, never raises."""
+        ``<id>.part``, ``<id>.new`` and an upload's private copy removed,
+        ``<id>.old`` put back when ``<id>`` is missing, else removed.
+        Logged, never raises.
+
+        A known window: a crash after the swap moved the new folder in and
+        before install.json was replaced leaves the new folder with the
+        old record (its version and SHA-256), which the next install or a
+        block by SHA-256 reads as the old one's."""
         try:
             names = os.listdir(self.pluginsDir)
         except OSError:
             return
         with self._lock:
             held = set(self._busy) | set(self._pending)
+        for name in names:
+            if _UPLOAD.fullmatch(name):
+                self._RemoveFile(os.path.join(self.pluginsDir, name))
         for pluginId in sorted({match.group(1) for match in
                                 map(_LEFTOVER.fullmatch, names) if match}):
             if pluginId in held:
@@ -1105,13 +1259,30 @@ def _RequireId(pluginId: Any) -> None:
         raise InstallError(INVALID_REQUEST)
 
 
-def _RemoveChildren(folder: str, *, keep: str) -> None:
-    """Remove what is in ``folder`` but the folder ``keep``. Raises
+def _CopyHashing(source: str, target: str, size: int) -> str:
+    """Copy ``source`` to a new file ``target`` (at most ``size`` bytes: a
+    file that grows on the way is not read further) and answer the SHA-256
+    of what was written. Raises OSError."""
+    digest = hashlib.sha256()
+    left = size
+    with open(source, "rb") as reader, open(target, "xb") as writer:
+        while left > 0:
+            chunk = reader.read(min(_CHUNK, left))
+            if not chunk:
+                break
+            writer.write(chunk)
+            digest.update(chunk)
+            left -= len(chunk)
+    return digest.hexdigest()
+
+
+def _RemoveChildren(folder: str, *, keep: Sequence[str]) -> None:
+    """Remove what is in ``folder`` but the names in ``keep``. Raises
     OSError."""
     for name in os.listdir(folder):
-        path = os.path.join(folder, name)
-        if name == keep and os.path.isdir(path) and not os.path.islink(path):
+        if name in keep:
             continue
+        path = os.path.join(folder, name)
         if os.path.isdir(path) and not os.path.islink(path):
             ZipSafety.RemoveTree(path)
         else:

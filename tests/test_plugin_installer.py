@@ -5,20 +5,25 @@ digest, the blocklist's three kinds, the install's steps with describe and
 the swap's put-back, the removal and the launch's sweep. The registry,
 describe and GitHub are fakes; every zip is made here."""
 
+import collections
 import hashlib
 import json
 import os
 import stat
+import struct
 import zipfile
 
 import pytest
 
+from loguru import logger
+
 from src.core import PluginInstaller as installer_module
 from src.core.PluginInstaller import (
-    BAD_ZIP, BLOCKED, DESCRIBE_FAILED, DESCRIPTOR_INVALID, ENTRY_MISSING,
-    ENTRY_OUTSIDE, FOLDER_NOT_ID, ID_MISMATCH, IN_PROGRESS, MANIFEST_INVALID,
-    MANIFEST_MISSING, MANIFEST_UNREADABLE, NETWORK_FAILED, NOT_FOUND,
-    NOT_ONE_FOLDER, NOT_PENDING, RUNNING, SHA256_MISMATCH, SIZE_MISMATCH,
+    BAD_ZIP, BLOCKED, BUILTIN, DESCRIBE_FAILED, DESCRIPTOR_INVALID,
+    DISK_FULL, ENTRY_MISSING, ENTRY_OUTSIDE, EXTRACT_FAILED, FOLDER_NOT_ID,
+    ID_MISMATCH, IN_PROGRESS, MANIFEST_INVALID, MANIFEST_MISSING,
+    MANIFEST_UNREADABLE, NETWORK_FAILED, NOT_FOUND, NOT_ONE_FOLDER,
+    NOT_PENDING, RUNNING, SECRETS_FAILED, SHA256_MISMATCH, SIZE_MISMATCH,
     SWAP_FAILED, VERSION_MISMATCH, ZIP_TOO_LARGE, BlockedBy, CheckDescriptor,
     ConsentDigest, DecideSource, InstallError, ParseBlocklist,
     PluginInstaller, VersionMatches)
@@ -28,7 +33,8 @@ from src.core.PluginTypes import (BlockEntry, DescribeAnswer,
                                   InstallRecord, InstallSource, Job,
                                   Manifest, ManifestCheck, ManifestProblem,
                                   ManifestReport, Permissions, ProblemScope)
-from src.core.ZipSafety import LINK, PATH_TOO_LONG
+from src.core.ZipSafety import (LINK, PATH_TOO_LONG, TOO_MANY_ENTRIES,
+                                ZIP_UNREADABLE)
 
 PLUGIN = "example.tool"
 REPO_ID = 812345678
@@ -147,10 +153,14 @@ class FakeRunner:
     def __init__(self):
         self.described = []
 
+        self.then = None
+
     def Describe(self, pluginDir, entry, *, dev):
         # describe runs in the staged folder, which holds the entry.
         assert os.path.isfile(os.path.join(pluginDir, *entry[0].split("/")))
         self.described.append((pluginDir, tuple(entry), dev))
+        if self.then is not None:
+            self.then()
         return object()
 
 
@@ -161,6 +171,7 @@ class FakeNetwork:
         self.zips = {}
         self.calls = []
         self.fail = False
+        self.failDownload = False
 
     def RepoName(self, repoId):
         self.calls.append(("RepoName", repoId))
@@ -183,23 +194,33 @@ class FakeNetwork:
     def Download(self, name, tag, zipName, target, size):
         self.calls.append(("Download", name, tag, zipName))
         with open(target, "wb") as file:
-            file.write(self.zips[(name, tag, zipName)])
+            data = self.zips[(name, tag, zipName)]
+            if self.failDownload:
+                file.write(data[:10])
+                raise OSError("connection reset")
+            file.write(data)
 
 
 class FakeSecrets:
     def __init__(self):
         self.forgotten = []
+        self.error = None
 
     def Forget(self, pluginId, *, dev):
+        if self.error is not None:
+            raise self.error
         self.forgotten.append((pluginId, dev))
 
 
 class FakeHooks:
     def __init__(self):
         self.forgotten = []
+        self.then = None
 
     def Forget(self, pluginId, reason):
         self.forgotten.append((pluginId, reason))
+        if self.then is not None:
+            self.then()
 
 
 class FakeJobs:
@@ -342,6 +363,95 @@ def test_the_longest_installed_path_must_fit(env):
     assert PATH_TOO_LONG in at(300)
 
 
+def test_the_longest_installed_folder_must_fit(env):
+    # A folder leaves room for an 8.3 name: 247, under the .new root.
+    deep = "d" * 60
+    path = _write_zip(env.tmp / "a.zip", [
+        (f"{PLUGIN}/plugin.json", _raw()), (f"{PLUGIN}/bin/tool.exe", b"MZ"),
+        (f"{PLUGIN}/{deep}/", b"")])
+    installer = env.make()
+
+    def at(folderLength):
+        base = os.path.abspath(os.sep + "a")
+        tail = len(os.sep + "plugins" + os.sep + PLUGIN + ".new" + os.sep
+                   + deep)
+        installer.pluginsDir = base + "b" * (folderLength - tail - len(base)) \
+            + os.sep + "plugins"
+        folder = os.path.join(installer.pluginsDir, PLUGIN + ".new", deep)
+        assert len(folder) == folderLength
+        return installer.CheckZip(path, None)
+
+    assert PATH_TOO_LONG not in at(247)
+    assert PATH_TOO_LONG in at(248)
+
+
+def test_too_many_entries_are_refused_before_zipfile_reads_them(
+        env, monkeypatch):
+    path = _plugin_zip(env.tmp / "a.zip")
+    monkeypatch.setattr(installer_module, "ZIP_MAX_ENTRIES", 2)
+
+    def unread(*_args, **_kwargs):
+        raise AssertionError("zipfile must not read it")
+
+    monkeypatch.setattr(installer_module.zipfile, "ZipFile", unread)
+    assert list(env.installer.CheckZip(path, None)) == [TOO_MANY_ENTRIES]
+
+
+def _break_entry(path, name, *, garbage=False, method=None):
+    """Damage ``name``'s stored bytes (a deflate stream no reader takes)
+    or mark it with another compression ``method``, in place."""
+    data = bytearray(open(path, "rb").read())
+    with zipfile.ZipFile(path) as archive:
+        info = archive.getinfo(name)
+    at = info.header_offset
+    nameLength, extraLength = struct.unpack_from("<2H", data, at + 26)
+    start = at + 30 + nameLength + extraLength
+    if garbage:
+        data[start:start + info.compress_size] = b"\xff" * info.compress_size
+    if method is not None:
+        struct.pack_into("<H", data, at + 8, method)
+        central = data.find(b"PK\x01\x02")
+        while central >= 0:
+            length = struct.unpack_from("<H", data, central + 28)[0]
+            if data[central + 46:central + 46 + length] == name.encode():
+                struct.pack_into("<H", data, central + 10, method)
+            central = data.find(b"PK\x01\x02", central + 4)
+    open(path, "wb").write(bytes(data))
+
+
+def _deflated_plugin_zip(path):
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{PLUGIN}/plugin.json", json.dumps(_raw()))
+        archive.writestr(f"{PLUGIN}/bin/tool.exe", b"MZ" + b"0" * 4096)
+    return str(path)
+
+
+BROKEN = [{"garbage": True}, {"method": 9}]  # 9: deflate64, unsupported
+
+
+@pytest.mark.parametrize("damage", BROKEN)
+def test_a_damaged_manifest_is_a_problem_never_an_exception(env, damage):
+    path = _deflated_plugin_zip(env.tmp / "a.zip")
+    _break_entry(path, f"{PLUGIN}/plugin.json", **damage)
+    assert MANIFEST_UNREADABLE in env.installer.CheckZip(path, None)
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromZip(path)
+    assert error.value.code == BAD_ZIP
+    assert os.listdir(env.plugins) == []
+
+
+@pytest.mark.parametrize("damage", BROKEN)
+def test_a_damaged_file_fails_the_unpacking_and_leaves_nothing(env, damage):
+    path = _deflated_plugin_zip(env.tmp / "a.zip")
+    _break_entry(path, f"{PLUGIN}/bin/tool.exe", **damage)
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromZip(path)
+    assert error.value.code == EXTRACT_FAILED
+    assert os.listdir(env.plugins) == []  # no .new, no private copy
+    assert env.installer.Pending(PLUGIN) is None
+    env.installer.PrepareFromZip(_plugin_zip(env.tmp / "b.zip"))  # not held
+
+
 def test_a_zip_over_the_limit_is_refused_unread(env, monkeypatch):
     path = _plugin_zip(env.tmp / "a.zip")
     monkeypatch.setattr(installer_module, "ZIP_MAX_BYTES",
@@ -369,7 +479,8 @@ def test_the_descriptor_is_held_to_the_zip(env):
 
 @pytest.mark.parametrize("change", [
     {"tag": "v1/../x"}, {"tag": "v1\\x"}, {"tag": "v1..0"}, {"tag": "v%2e"},
-    {"tag": "v1\n"}, {"tag": ""}, {"autona_plugin": 2},
+    {"tag": "v1\n"}, {"tag": ""}, {"tag": "v1?x"}, {"tag": "v1#x"},
+    {"tag": "v1 0"}, {"tag": "v1\u3000"}, {"autona_plugin": 2},
     {"autona_plugin": True}, {"id": "Bad"}, {"version": "1.0"},
     {"protocol": []}, {"min_autona": "x"},
 ])
@@ -380,7 +491,8 @@ def test_a_descriptor_that_does_not_fit(env, change):
     assert DESCRIPTOR_INVALID in env.installer.CheckZip(path, data)
 
 
-@pytest.mark.parametrize("name", ["a/b.zip", "..zip", "a%20.zip", "a\x00"])
+@pytest.mark.parametrize("name", ["a/b.zip", "..zip", "a%20.zip", "a\x00",
+                                  "a?.zip", "a#.zip", "a b.zip"])
 def test_a_descriptor_zip_name_that_cannot_be_a_url_part(env, name):
     path = _plugin_zip(env.tmp / "a.zip")
     data = _descriptor(path)
@@ -638,11 +750,45 @@ def test_a_new_install_forgets_secrets_and_hooks_before_the_swap(env):
     folder.mkdir(parents=True)
     (folder / "secrets.bin").write_bytes(b"dpapi")
     (folder / "config.json").write_text("{}")
+    (folder / "hooks.json").write_text("{}")
+    (folder / "data").mkdir()
     _install_manual(env)
     assert env.secrets.forgotten == [(PLUGIN, False)]
     assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.NEW_INSTALL)]
-    assert not (folder / "secrets.bin").exists()
-    assert (folder / "config.json").exists()
+    # No record: nothing says whose the values were but data/, which a
+    # removal kept on purpose.
+    assert sorted(os.listdir(folder)) == ["data", "install.json"]
+
+
+def test_a_new_install_over_another_source_inherits_nothing(env):
+    _install_manual(env)  # manual, recorded
+    folder = _user_dir(env)
+    (folder / "config.json").write_text("{}")
+    (folder / "hooks.json").write_text("{}")
+    (folder / "data").mkdir()
+    (folder / "data" / "state.txt").write_text("theirs")
+    path = _plugin_zip(env.tmp / "b.zip", version="2.0.0")
+    _release(env, path, version="2.0.0")
+    env.hooks.forgotten.clear()
+    pending = env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    assert pending.decision == InstallDecision.NEW_INSTALL
+    env.installer.Commit(pending)
+    assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.NEW_INSTALL)]
+    assert sorted(os.listdir(folder)) == ["install.json"]
+    assert _record(env)["source"]["kind"] == "github"
+
+
+def test_a_secrets_failure_on_a_new_install_keeps_the_old_plugin(env):
+    _install_manual(env)
+    path = _plugin_zip(env.tmp / "b.zip", version="2.0.0")
+    _release(env, path, version="2.0.0")
+    pending = env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    env.secrets.error = PermissionError(13, "denied")
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == SECRETS_FAILED
+    assert _record(env)["source"] == {"kind": "manual"}
+    assert not os.path.exists(pending.new_dir)
 
 
 def test_discard_removes_the_staged_folder(env):
@@ -758,6 +904,147 @@ def test_no_swap_while_the_plugin_runs(env):
     env.installer.Commit(pending)
 
 
+def test_a_run_started_during_describe_keeps_the_install_pending(env):
+    _install_manual(env)
+    path = _plugin_zip(env.tmp / "b.zip", version="2.0.0")
+    _release(env, path, version="2.0.0")
+    pending = env.installer.PrepareFromListing(REPO_ID, PLUGIN)  # new source
+    env.hooks.forgotten.clear()
+    env.runner.then = lambda: env.jobs.running.add(PLUGIN)
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == RUNNING
+    assert env.installer.Pending(PLUGIN) is pending
+    assert os.path.isdir(pending.new_dir)
+    # Nothing of the old plugin was forgotten or replaced.
+    assert env.hooks.forgotten == [] and env.secrets.forgotten == [
+        (PLUGIN, False)]
+    assert _record(env)["source"] == {"kind": "manual"}
+    env.runner.then = None
+    env.jobs.running.clear()
+    env.installer.Commit(pending)
+    assert _record(env)["version"] == "2.0.0"
+
+
+def test_a_dev_folder_added_during_consent_refuses_the_commit(env):
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    env.devIds.add(PLUGIN)
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == InstallDecision.REFUSE_DEV_ID.value
+    assert not os.path.exists(pending.new_dir)
+    assert env.runner.described == []
+
+
+def test_a_record_that_cannot_be_synced_leaves_no_temporary_file(
+        env, monkeypatch):
+    _install_manual(env)
+    before = _record(env)
+    pending = env.installer.PrepareFromZip(
+        _plugin_zip(env.tmp / "b.zip", version="2.0.0"))
+
+    def fail(_fd):
+        raise OSError(5, "I/O error")
+
+    monkeypatch.setattr(installer_module.os, "fsync", fail)
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == SWAP_FAILED
+    assert sorted(os.listdir(_user_dir(env))) == ["install.json"]
+    assert _record(env) == before
+
+
+Usage = collections.namedtuple("Usage", "total used free")
+
+
+def test_no_room_on_the_drive_refuses_before_writing(env, monkeypatch):
+    path = _plugin_zip(env.tmp / "a.zip")
+    _release(env, path)
+    room = {"free": 10 ** 12}
+    monkeypatch.setattr(installer_module.shutil, "disk_usage",
+                        lambda _path: Usage(0, 0, room["free"]))
+    room["free"] = installer_module.DISK_MARGIN_BYTES  # nothing beyond it
+    for prepare in (lambda: env.installer.PrepareFromZip(path),
+                    lambda: env.installer.PrepareFromListing(REPO_ID,
+                                                             PLUGIN)):
+        with pytest.raises(InstallError) as error:
+            prepare()
+        assert error.value.code == DISK_FULL
+        assert os.listdir(env.plugins) == []
+    assert not any(call[0] == "Download" for call in env.network.calls)
+    # Room for the zip but not for what it unpacks to.
+    packed = _deflated_plugin_zip(env.tmp / "packed.zip")
+    _release(env, packed)
+    assert os.path.getsize(packed) < 4096
+    room["free"] = installer_module.DISK_MARGIN_BYTES + 4096
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    assert error.value.code == DISK_FULL
+    assert os.listdir(env.plugins) == []
+
+
+def test_unknown_free_space_is_no_refusal(env, monkeypatch):
+    def unknown(_path):
+        raise OSError("not a drive")
+
+    monkeypatch.setattr(installer_module.shutil, "disk_usage", unknown)
+    env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+
+
+def test_a_manual_zip_is_read_from_a_private_copy(env, monkeypatch):
+    path = _plugin_zip(env.tmp / "a.zip")
+    original = open(path, "rb").read()
+    copies = []
+    real = installer_module._CopyHashing
+
+    def copy(source, target, size):
+        sha = real(source, target, size)
+        copies.append(target)
+        # The user's file changes after the copy: nothing reads it again.
+        _plugin_zip(env.tmp / "a.zip", version="9.9.9")
+        return sha
+
+    monkeypatch.setattr(installer_module, "_CopyHashing", copy)
+    pending = env.installer.PrepareFromZip(path)
+    assert pending.version == "1.0.0"
+    assert pending.sha256 == hashlib.sha256(original).hexdigest()
+    assert os.path.dirname(copies[0]) == str(env.plugins)
+    assert os.path.basename(copies[0]).startswith(".upload-")
+    assert os.listdir(env.plugins) == [PLUGIN + ".new"]  # the copy is gone
+
+
+def test_a_hash_that_cannot_be_read_writes_nothing(env, monkeypatch):
+    path = _plugin_zip(env.tmp / "a.zip")
+    _release(env, path)
+
+    def unreadable(_path):
+        raise OSError(13, "denied")
+
+    monkeypatch.setattr(installer_module, "FileSha256", unreadable)
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    assert (error.value.code, error.value.problems) == (BAD_ZIP,
+                                                        (ZIP_UNREADABLE,))
+    assert os.listdir(env.plugins) == []
+
+
+def test_logs_name_no_path(env, monkeypatch):
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        def held(_path):
+            raise PermissionError(13, "denied", str(env.plugins))
+
+        pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+        monkeypatch.setattr(installer_module.ZipSafety, "RemoveTree", held)
+        env.installer.Discard(pending)
+    finally:
+        logger.remove(sink)
+    text = "".join(messages)
+    assert "PermissionError errno 13" in text
+    assert str(env.tmp) not in text and "Traceback" not in text
+
+
 def test_a_dev_folders_id_and_a_reserved_id_are_refused(env):
     env.devIds.add(PLUGIN)
     with pytest.raises(InstallError) as error:
@@ -850,8 +1137,10 @@ def test_the_recorded_repository_is_asked_before_update_github(env):
     assert pending.source == GITHUB
     assert pending.decision == InstallDecision.UPDATE
     assert not pending.needs_consent  # the same digest
+    env.hooks.forgotten.clear()
     env.installer.Commit(pending)
     assert env.secrets.forgotten == []  # an update keeps the secrets
+    assert env.hooks.forgotten == []  # and the hooks, consent unchanged
 
 
 def test_a_listing_install_downloads_checks_and_records(env):
@@ -897,6 +1186,30 @@ def test_a_listing_fails_without_the_network(env):
     assert error.value.code == NETWORK_FAILED
 
 
+def test_a_failed_download_keeps_its_part_for_the_sweep(env):
+    _release(env, _plugin_zip(env.tmp / "a.zip"))
+    env.network.failDownload = True
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    assert error.value.code == NETWORK_FAILED
+    assert os.listdir(env.plugins) == [PLUGIN + ".part"]
+    assert env.installer.Pending(PLUGIN) is None
+    env.installer.Sweep()
+    assert os.listdir(env.plugins) == []
+    env.network.failDownload = False
+    env.installer.PrepareFromListing(REPO_ID, PLUGIN)  # not held
+
+
+@pytest.mark.parametrize("name", ["owner/..", "owner/.", "a/b c", "a/b?c"])
+def test_a_repository_name_that_climbs_is_refused(env, name):
+    env.network.names[REPO_ID] = name
+    with pytest.raises(InstallError) as error:
+        env.installer.PrepareFromListing(REPO_ID, PLUGIN)
+    assert error.value.code == NETWORK_FAILED
+    assert not any(call[0] == "LatestDescriptor"
+                   for call in env.network.calls)
+
+
 def test_an_official_listing_may_install_a_taguyan_id(env):
     path = _plugin_zip(env.tmp / "a.zip", pluginId="taguyan.webhook")
     _release(env, path, pluginId="taguyan.webhook")
@@ -937,6 +1250,9 @@ def test_a_changed_digest_asks_consent_on_an_update(env):
     pending = env.installer.PrepareFromListing(REPO_ID, PLUGIN)
     assert pending.decision == InstallDecision.UPDATE
     assert pending.needs_consent
+    env.hooks.forgotten.clear()
+    env.installer.Commit(pending)
+    assert env.hooks.forgotten == [(PLUGIN, HookDisabledReason.RECONSENT)]
 
 
 def test_a_damaged_record_reads_as_none(env):
@@ -1015,6 +1331,59 @@ def test_remove_refusals(env):
         env.installer.Remove("../escape", data=True, runs="delete")
 
 
+def test_remove_takes_what_an_install_left_so_sweep_brings_nothing_back(
+        env):
+    _install_manual(env)
+    for suffix in (".old", ".new"):
+        (env.plugins / (PLUGIN + suffix)).mkdir()
+        (env.plugins / (PLUGIN + suffix) / "plugin.json").write_text("{}")
+    (env.plugins / (PLUGIN + ".part")).write_bytes(b"partial")
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert os.listdir(env.plugins) == []
+    env.installer.Sweep()
+    assert os.listdir(env.plugins) == []
+
+
+def test_remove_of_only_leftovers_is_no_not_found(env):
+    (env.plugins / (PLUGIN + ".old")).mkdir(parents=True)
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert os.listdir(env.plugins) == []
+
+
+def test_remove_without_data_drops_an_empty_user_folder(env):
+    _install_manual(env)
+    env.installer.Remove(PLUGIN, data=False, runs="keep")
+    assert not _user_dir(env).exists()
+
+
+def test_the_built_in_plugin_is_never_removed(env):
+    (env.plugins / "taguyan.vodsplit").mkdir(parents=True)
+    with pytest.raises(InstallError) as error:
+        env.installer.Remove("taguyan.vodsplit", data=True, runs="delete")
+    assert error.value.code == BUILTIN
+    assert (env.plugins / "taguyan.vodsplit").is_dir()
+
+
+def test_a_forget_that_fails_stops_the_removal(env):
+    _install_manual(env)
+    env.secrets.error = OSError(5, "I/O error")
+    with pytest.raises(InstallError) as error:
+        env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert error.value.code == SECRETS_FAILED
+    assert (env.plugins / PLUGIN).is_dir()
+    env.secrets.error = None
+    env.installer.Remove(PLUGIN, data=True, runs="delete")  # not held
+
+
+def test_a_run_started_while_forgetting_stops_the_removal(env):
+    _install_manual(env)
+    env.hooks.then = lambda: env.jobs.running.add(PLUGIN)
+    with pytest.raises(InstallError) as error:
+        env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert error.value.code == RUNNING
+    assert (env.plugins / PLUGIN).is_dir()
+
+
 # ── the launch's sweep ──────────────────────────────────────────────────
 
 def test_sweep_cleans_what_a_crash_left(env):
@@ -1027,8 +1396,11 @@ def test_sweep_cleans_what_a_crash_left(env):
     (plugins / "get.this.part").write_bytes(b"partial")
     (plugins / "unrelated.folder").mkdir()
     (plugins / "Not An Id.new").mkdir()
+    (plugins / ".upload-0123456789abcdef.part").write_bytes(b"copy")
+    (plugins / ".upload-short.part").write_bytes(b"not ours")
     env.installer.Sweep()
-    assert sorted(os.listdir(plugins)) == ["Not An Id.new", "kept.one",
+    assert sorted(os.listdir(plugins)) == [".upload-short.part",
+                                           "Not An Id.new", "kept.one",
                                            "lost.one", "unrelated.folder"]
     assert (plugins / "lost.one" / "plugin.json").is_file()
 

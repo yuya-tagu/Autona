@@ -4,14 +4,17 @@ anything is unpacked, the unpacking, and the swap with its put-back."""
 import io
 import os
 import stat
+import struct
 import zipfile
 
 import pytest
 
 from src.core import ZipSafety
-from src.core.ZipSafety import (BAD_NAME, DUPLICATE_NAME, ENCRYPTED,
+from src.core.ZipSafety import (BAD_NAME, DIRECTORY_TOO_LARGE,
+                                DUPLICATE_NAME, ENCRYPTED,
                                 EXPANDED_TOO_LARGE, LINK, NOT_ASCII,
-                                RESERVED_NAME, TOO_MANY_ENTRIES, UNSAFE_PATH)
+                                RESERVED_NAME, TOO_MANY_ENTRIES, UNSAFE_PATH,
+                                ZIP_UNREADABLE)
 
 
 def _zip(entries, *, mutate=None):
@@ -39,6 +42,8 @@ def _inspect(entries, **kwargs):
 @pytest.mark.parametrize("name, problem", [
     ("/abs/a", UNSAFE_PATH),
     ("\\abs\\a", UNSAFE_PATH),
+    ("\\\\server\\share\\a", UNSAFE_PATH),
+    ("//server/share/a", UNSAFE_PATH),
     ("C:/a", UNSAFE_PATH),
     ("a/../b", UNSAFE_PATH),
     ("a\\..\\b", UNSAFE_PATH),
@@ -53,6 +58,8 @@ def _inspect(entries, **kwargs):
     ("./a", BAD_NAME),
     ("a/q?.txt", BAD_NAME),
     ("a/tab\tname", BAD_NAME),
+    ("a/LONGFO~1", BAD_NAME),
+    ("a/PROGRA~2/x.exe", BAD_NAME),
     ("a/caf\u00e9", NOT_ASCII),
 ])
 def test_a_name_that_leaves_or_cannot_be_written_is_a_problem(name, problem):
@@ -130,12 +137,81 @@ def test_each_problem_is_reported_once_in_the_order_found():
     assert plan.problems == (UNSAFE_PATH, RESERVED_NAME)
 
 
-def test_longest_path_counts_under_the_root_after_strip(tmp_path):
-    plan = _inspect([("x/bin/abc.exe", b"1"), ("x/a", b"1")])
+def test_a_tilde_without_a_digit_is_a_name():
+    assert ZipSafety.NameProblem("a/file~x.txt") == (("a", "file~x.txt"),
+                                                     None)
+
+
+def test_path_lengths_count_files_and_folders_under_the_root(tmp_path):
+    plan = _inspect([("x/bin/abc.exe", b"1"), ("x/a", b"1"),
+                     ("x/deep/er/", None)])
     root = str(tmp_path / "plugins" / "x")
-    assert ZipSafety.LongestPath(root, plan.entries, strip=1) == len(
-        os.path.join(root, "bin", "abc.exe"))
-    assert ZipSafety.LongestPath(root, (), strip=1) == len(root)
+    assert ZipSafety.PathLengths(root, plan.entries, strip=1) == (
+        len(os.path.join(root, "bin", "abc.exe")),
+        len(os.path.join(root, "deep", "er")))
+    assert ZipSafety.PathLengths(root, (), strip=1) == (0, len(root))
+
+
+# ── the central directory before zipfile reads it ───────────────────────
+
+def _zip_file(path, count, *, prefix=b""):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for index in range(count):
+            archive.writestr(f"x/{index}", b"1")
+    path.write_bytes(prefix + buffer.getvalue())
+    return str(path)
+
+
+def _set_end_record(path, *, entries=None, size=None):
+    data = bytearray(open(path, "rb").read())
+    at = len(data) - 22
+    assert data[at:at + 4] == b"PK\x05\x06"
+    if entries is not None:
+        struct.pack_into("<2H", data, at + 8, entries, entries)
+    if size is not None:
+        struct.pack_into("<L", data, at + 12, size)
+    open(path, "wb").write(bytes(data))
+
+
+def test_the_central_directory_is_checked_from_the_end_records(tmp_path):
+    check = ZipSafety.CheckCentralDirectory
+    path = _zip_file(tmp_path / "a.zip", 5)
+    assert check(path, maxEntries=5) is None
+    assert check(path, maxEntries=4) == TOO_MANY_ENTRIES
+    assert check(path, maxEntries=5, maxDirectoryBytes=10) == \
+        DIRECTORY_TOO_LARGE
+    # Bytes before the zip (a self-extractor) are read as zipfile reads them.
+    prefixed = _zip_file(tmp_path / "b.zip", 2, prefix=b"MZ" * 100)
+    assert check(prefixed, maxEntries=2) is None
+    assert zipfile.ZipFile(prefixed).namelist() == ["x/0", "x/1"]
+
+
+def test_a_count_that_lies_is_caught_by_walking_the_directory(tmp_path):
+    path = _zip_file(tmp_path / "a.zip", 5)
+    _set_end_record(path, entries=1)
+    # zipfile walks the directory by its size, not by the stated count.
+    assert len(zipfile.ZipFile(path).infolist()) == 5
+    assert ZipSafety.CheckCentralDirectory(path, maxEntries=4) == \
+        TOO_MANY_ENTRIES
+
+
+def test_a_directory_that_is_not_there_is_unreadable(tmp_path):
+    check = ZipSafety.CheckCentralDirectory
+    path = _zip_file(tmp_path / "a.zip", 2)
+    _set_end_record(path, size=10 ** 6)
+    assert check(path, maxEntries=10) == ZIP_UNREADABLE
+    other = tmp_path / "b.zip"
+    other.write_bytes(b"not a zip at all")
+    assert check(str(other), maxEntries=10) == ZIP_UNREADABLE
+    assert check(str(tmp_path / "missing.zip"), maxEntries=10) == \
+        ZIP_UNREADABLE
+
+
+def test_why_names_the_type_and_errno_never_the_path():
+    error = PermissionError(13, "denied", "C:\\Users\\someone\\x")
+    assert ZipSafety.Why(error) == "PermissionError errno 13"
+    assert ZipSafety.Why(ValueError("C:\\x")) == "ValueError"
 
 
 def test_extract_strips_and_writes_inside_the_target(tmp_path):
@@ -251,6 +327,25 @@ def test_a_rename_held_by_an_antivirus_is_tried_again(tmp_path, monkeypatch):
     monkeypatch.setattr(ZipSafety.os, "rename", rename)
     ZipSafety.Swap(str(new), str(current), str(old), sleep=slept.append)
     assert (current / "file").read_text() == "new"
+    assert slept == [0.2, 0.4]
+
+
+def test_replace_is_tried_again_while_the_target_is_held(
+        tmp_path, monkeypatch):
+    source, target = tmp_path / "a.tmp", tmp_path / "a.json"
+    source.write_text("new")
+    target.write_text("old")
+    real, calls, slept = os.replace, [], []
+
+    def replace(a, b):
+        calls.append(a)
+        if len(calls) < 3:
+            raise PermissionError("held")
+        real(a, b)
+
+    monkeypatch.setattr(ZipSafety.os, "replace", replace)
+    ZipSafety.Replace(str(source), str(target), sleep=slept.append)
+    assert target.read_text() == "new" and not source.exists()
     assert slept == [0.2, 0.4]
 
 
