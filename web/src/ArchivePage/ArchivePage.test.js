@@ -108,6 +108,34 @@ const forbidden = () => Promise.reject(
 
 const count = (path) => calls.filter((c) => c === path).length;
 
+// The running job's progress (JobProgressView, shared with the plugins page):
+// its stage line, the bar, the time left, the last five log lines and Stop.
+test("a running job shows its stage, bar, eta, five log lines and Stop", async () => {
+    const running = job("A", "running", {
+        progress: {index: 2, count: 5, label: "Scanning", overall: 0.4,
+                   eta: 125},
+        logs: ["l1", "l2", "l3", "l4", "l5", "l6", "l7"]});
+    install({
+        statusExtra: {running_job: "A"},
+        handlers: {
+            "/api/v1/archive/jobs": () => Promise.resolve(
+                {data: {jobs: [running]}}),
+            "/api/v1/archive/jobs/A": () => Promise.resolve(
+                {data: {job: running, sets: null}}),
+        },
+    });
+    render(<ArchivePage/>);
+    expect(await screen.findByText("[2/5] Scanning")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow"))
+        .toBe("40");
+    expect(screen.getByText(i18n.t("archive_eta_min",
+                                   {min: 2, sec: "05"}))).toBeTruthy();
+    expect(screen.getByLabelText(i18n.t("archive_logs")).textContent)
+        .toBe("l3\nl4\nl5\nl6\nl7");
+    expect(screen.getByRole("button", {name: i18n.t("archive_abort")}))
+        .toBeEnabled();
+});
+
 test("a late answer for the previous job is ignored and polling stays off", async () => {
     deferredA = {};
     const jobs = {data: {jobs: [job("A", "running"), job("B", "done")]}};

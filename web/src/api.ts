@@ -79,6 +79,16 @@ export async function apiGetJson<T = unknown>(path: string, opts?: ApiOptions): 
     return (await request(path, undefined, opts)).json();
 }
 
+// A text / binary body (the plugin run's log, an artifact): the same request
+// and error fields as the JSON reads.
+export async function apiGetText(path: string, opts?: ApiOptions): Promise<string> {
+    return (await request(path, undefined, opts)).text();
+}
+
+export async function apiGetBlob(path: string, opts?: ApiOptions): Promise<Blob> {
+    return (await request(path, undefined, opts)).blob();
+}
+
 async function send(method: string, path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
     const resp = await request(path, {
         method,
