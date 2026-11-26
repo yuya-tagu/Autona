@@ -27,7 +27,8 @@ default, never under user_data/: the videos are large and the operator's):
   sets.json's ``thumb``), a matched set's title and description
   ``NN_<title>.txt``, and its analysis cache ``.cache``);
 - ``<work>/<id>/worker.log``: the worker's stderr and what it printed on
-  stdout that is not a JSON line, appended by this process alone;
+  stdout that is not a JSON line, appended by this process alone (one at
+  half the runner's limit becomes ``worker.log.1`` before a run);
 - ``<work>/<id>/review.json``: the operator's review of the sets (ADR-006
   A4: confirmed, IN / OUT, which result; core/ArchiveReview.py), written
   whole when the page saves it;
@@ -60,12 +61,18 @@ written
 into the job's templates/ before job.json says it runs: the worker picks the
 one for the event, ADR-006 A6). The source is a URL or a file on a
 drive of this PC (a share's path is refused unread: ``CheckSource``),
-checked again on a resume. Two threads of this service read it
-(``_Start``): one its stdout's JSON lines into the progress held in memory
-(the latest stage and progress, the last ``LOG_LINES`` log lines, the
-warnings, the final ``done`` / ``error`` / ``cancelled`` line), then ends
-the job when the stdout closes (``_Finish``); the other its stderr into
-worker.log. The end state:
+checked again on a resume.
+
+The run is the built-in plugin ``taguyan.vodsplit``'s (ADR-009 D9): started
+by core/PluginRunner.py (``_Start``; ArchiveWorker.RunSpec says what), which
+reads its stdout's events on its own thread and its stderr into worker.log
+(with the stdout lines that are not events), and decides how it ended. Its
+events come here (``_OnEvent``: the latest stage and progress, the last
+``LOG_LINES`` log lines, the warnings), its end too (``_Finish``). It holds
+the heavy lane PluginJobs owns (``Claim`` at the start, ``Release`` at the
+end, whatever the end): a start while a plugin's run holds it is BUSY, and
+a plugin's heavy run is BUSY while a job runs. The end state is
+contract_1.json's table, decided by the runner (ADR-009 A.6):
 
 - exit 0 with ``done``: ``done`` (with the sets and how many need review);
 - exit 2 with ``error``: ``error`` (the worker's code, message and hint:
@@ -74,14 +81,21 @@ worker.log. The end state:
   ``cancelled``;
 - anything else: ``failed``, the message carrying the tail of worker.log.
 
-A cancel writes ``cancel`` to the worker's stdin and closes it; the worker
-stops at its next check and says ``cancelled``. ``Resume`` runs the same
+A worker that cannot be started -- a job object that cannot be made for it
+too: the runner does not run it without one -- ends the job ``failed`` at
+once, and the start answers UNAVAILABLE with why.
+
+A cancel is the runner's (RunHandle.Cancel): the job's priority back to
+normal, ``cancel`` written to the worker's stdin and stdin closed; the
+worker stops at its next check and says ``cancelled``, and one still there
+CANCEL_GRACE_SECONDS later is ended with its job. ``Resume`` runs the same
 command again: the worker picks up from its caches (the download, the
 analysis); while it runs, ``Job`` answers no sets (out/sets.json is the
-previous run's until the worker writes its own). ``Shutdown`` (the shells' close) cancels, waits, then ends the
-worker and every process it started (the job object). A job a previous
-Autona left ``running`` (it ended without its close: a crash, a kill) is
-rewritten ``cancelled`` the first time the work folder is used.
+previous run's until the worker writes its own). ``Shutdown`` (the shells'
+close) cancels, waits, then ends the worker and every process it started
+(RunHandle.Kill: its job object). A job a previous Autona left ``running``
+(it ended without its close: a crash, a kill) is rewritten ``cancelled``
+the first time the work folder is used.
 
 The reanalysis
 --------------
@@ -195,13 +209,17 @@ starts (a start, a resume, an export and a preview are BUSY, the status
 says the worker is being replaced, without probing). The release drops the
 cached probe, so the next status probes the new worker.
 
-Threads and locks: the request threads, the two reader threads, and for
-the thumbnails the main thread and the task executor's. ``_lock`` holds the
+Threads and locks: the request threads, the runner's two threads of a run
+(its events and its end come on one), and for the thumbnails the main
+thread and the task executor's. ``_lock`` holds the
 runs in memory, the probe's cache and the swept work folders;
 ``_filesLock`` every read and write of a job.json and a review.json (on
 Windows an os.replace fails while another thread has the file open); taken
 in that order. ArchiveTemplates' lock is never taken under them (the
 templates are read before), ``_titlesLock`` (the preview that runs) alone.
+PluginJobs' lock is a leaf below ``_lock`` (the Claim); every Release --
+a refused start's, a run's end -- is outside ``_lock`` (it calls
+PluginJobs' onLaneFreed, outside every lock).
 The version probe (up to
 ``ArchiveWorker.PROBE_TIMEOUT_SECS``) runs under its own lock, never under
 ``_lock``; a request waits for one probe at most (the web client's timeout
@@ -230,7 +248,10 @@ from loguru import logger
 
 from . import (ArchiveReview, ArchiveTemplates, ArchiveThumbnails,
                ArchiveWorker, ImageImport)
+from . import PluginTypes as T
 from .GameAssetCatalog import GameAssetCatalog
+from .PluginJobs import PluginJobs
+from .PluginRunner import PluginRunner
 from .SettingsManager import SettingsManager
 from .TaskExecutor import TaskExecutor
 from .ThumbnailService import ThumbnailService
@@ -247,6 +268,8 @@ JOB_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[a-z0-9]{4}")
 JOB_FILE = "job.json"
 RESULTS_FILE = "results.json"
 LOG_FILE = "worker.log"
+# worker.log's one older generation (_TurnOverLog).
+LOG_OLD_SUFFIX = ".1"
 OUT_DIR = "out"
 SETS_FILE = "sets.json"
 # The worker's analysis cache in out/ (vodsplit's default for --cache).
@@ -293,10 +316,11 @@ MAX_SOURCE = 2048
 MAX_EVENT = 200
 MAX_WORK_DIR = 1024
 
-# How long the reader waits for the stderr reader once the stdout closed.
-_STDERR_JOIN_SECS = 5
 # How long Shutdown waits for the end to be written after it killed.
 _KILL_WAIT_SECS = 2
+# The built-in plugin a job's run is (ADR-009 D9): the owner of the heavy
+# lane it claims from PluginJobs.
+BUILTIN_PLUGIN_ID = "taguyan.vodsplit"
 
 _REPLACE_ATTEMPTS = 4
 _REPLACE_BACKOFF = 0.05
@@ -388,6 +412,9 @@ SWAP_BUSY_JOB = ("切り抜きジョブの実行中は切り抜きワーカー�
 SWAP_BUSY_PROBE = "切り抜きワーカーを確認しているところです。少し待ってからもう一度押してください。"
 SWAP_BUSY_TITLES = ("タイトルのプレビューを作っているところです。"
                     "終わってからもう一度押してください。")
+# A start while a plugin's run holds the heavy lane (ADR-009 D6).
+PLUGIN_BUSY = ("プラグインのジョブが実行中です。"
+               "終わるか中止してから始めてください。")
 
 # The preview's refusals' words (VideoFile / FrameFile, and v1 when the
 # file is gone by the time it opens it).
@@ -733,16 +760,20 @@ class _Run:
         self.jobDir = jobDir
         self.workDir = workDir
         self.kind = kind
-        self.worker = None
+        # The runner's RunHandle once started.
+        self.handle = None
         self.progress = None
         self.logs = deque(maxlen=LOG_LINES)
         self.warnings = []
-        self.final = None
         self.cancelRequested = False
         self.finished = threading.Event()
-        self.logFile = None
-        self.logLock = threading.Lock()
-        self.stderrThread = None
+        # Whether _Start saw the process started (under _lock), and whether
+        # the runner ended it before that (a launch that failed); the
+        # PluginJobs whose heavy lane it holds, and whether it still does.
+        self.started = False
+        self.launchEnded = False
+        self.lanes = None
+        self.laneHeld = False
 
 
 class _ThumbRun:
@@ -800,11 +831,14 @@ def _Numbered(items, no):
 class ArchiveJobService:
     instance = None
 
-    def __init__(self, probe=None, launch=None):
-        # The worker's probe and start (ArchiveWorker's; a test passes its
-        # own).
+    def __init__(self, probe=None, runner=None, lanes=None):
+        # The worker's probe (ArchiveWorker's; a test passes its own), the
+        # runner that starts its runs and the PluginJobs whose heavy lane
+        # they hold (bootstrap_core's; None: the class's instance when
+        # used).
         self._probe = probe or ArchiveWorker.Probe
-        self._launch = launch or ArchiveWorker.Launch
+        self._runner = runner
+        self._lanes = lanes
         self._lock = threading.RLock()
         self._filesLock = threading.Lock()
         self._probeLock = threading.Lock()
@@ -1621,34 +1655,44 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse(export=True)
-                record = self._DiskRecord(jobDir, jobId)
-                if record is None:
-                    raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
-                request = self._ExportRequest(workDir, jobDir, record)
-                record["export"] = {
-                    "state": "running", "started_at": _Now(), "finished_at": None,
-                    "exit_code": None, "error": None, "warnings": [], "logs": [],
-                    "progress": None, "clips": None, "skipped": None}
-                run = _Run(record, jobDir, workDir, kind=EXPORT)
-                try:
-                    os.makedirs(os.path.join(jobDir, CLIPS_DIR), exist_ok=True)
-                    self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
-                    # Before job.json says it runs: what fails here leaves no
-                    # export that runs without a worker.
-                    arguments = self._Arguments(
-                        run, self._WriteTemplates(jobDir, templates))
-                    self._WriteRecord(jobDir, record)
-                except OSError as error:
-                    raise ArchiveError(WORK_DIR_UNUSABLE,
-                                       f"作業フォルダに書けません: {error}")
-                logger.info(f"Archive: job {jobId} export started "
-                            f"({len(request['sets'])} sets)")
-                self._Start(run, probe, arguments)
-                return self._RunView(jobId)
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse(export=True)
+                    # The job's own refusals (gone, not done ...) before
+                    # the heavy lane's BUSY.
+                    record = self._DiskRecord(jobDir, jobId)
+                    if record is None:
+                        raise ArchiveError(NOT_FOUND, "その切り抜きジョブはありません。")
+                    request = self._ExportRequest(workDir, jobDir, record)
+                    lanes = self._ClaimLane()
+                    record["export"] = {
+                        "state": "running", "started_at": _Now(),
+                        "finished_at": None, "exit_code": None, "error": None,
+                        "warnings": [], "logs": [], "progress": None,
+                        "clips": None, "skipped": None}
+                    run = _Run(record, jobDir, workDir, kind=EXPORT)
+                    try:
+                        os.makedirs(os.path.join(jobDir, CLIPS_DIR),
+                                    exist_ok=True)
+                        self._WriteFile(jobDir, EXPORT_REQUEST_FILE, request)
+                        # Before job.json says it runs: what fails here
+                        # leaves no export that runs without a worker.
+                        arguments = self._Arguments(
+                            run, self._WriteTemplates(jobDir, templates))
+                        self._WriteRecord(jobDir, record)
+                    except OSError as error:
+                        raise ArchiveError(WORK_DIR_UNUSABLE,
+                                           f"作業フォルダに書けません: {error}")
+                    logger.info(f"Archive: job {jobId} export started "
+                                f"({len(request['sets'])} sets)")
+                    self._Start(run, probe, arguments, lanes)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     # ── the titles' preview (ADR-006 A6) ───────────────────────────────
 
@@ -2190,43 +2234,51 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse()
-                workDir = self.WorkDir()
-                try:
-                    os.makedirs(workDir, exist_ok=True)
-                except OSError as error:
-                    raise ArchiveError(WORK_DIR_UNUSABLE,
-                                       f"作業フォルダを作れません: {error}")
-                self._Sweep(workDir)
-                jobId, jobDir = self._MakeJobDir(workDir)
-                record = {
-                    "id": jobId, "created_at": _Now(), "finished_at": None,
-                    "source": source, "event": event,
-                    "has_results": results is not None, "state": "running",
-                    "exit_code": None, "sets": None, "needs_review": None,
-                    "error": None, "warnings": [], "logs": [], "progress": None,
-                    "worker_version": probe.version, "export": None,
-                }
-                run = _Run(record, jobDir, workDir)
-                try:
-                    os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
-                    if results is not None:
-                        self._WriteFile(jobDir, RESULTS_FILE, results)
-                    # Before job.json says it runs: what fails here leaves no
-                    # job that runs without a worker.
-                    arguments = self._Arguments(
-                        run, self._WriteTemplates(jobDir, templates),
-                        probe.features)
-                    self._WriteRecord(jobDir, record)
-                except OSError as error:
-                    raise ArchiveError(WORK_DIR_UNUSABLE,
-                                       f"作業フォルダに書けません: {error}")
-                logger.info(f"Archive: job {jobId} created")
-                self._Start(run, probe, arguments)
-                return self._RunView(jobId)
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse()
+                    lanes = self._ClaimLane()
+                    workDir = self.WorkDir()
+                    try:
+                        os.makedirs(workDir, exist_ok=True)
+                    except OSError as error:
+                        raise ArchiveError(WORK_DIR_UNUSABLE,
+                                           f"作業フォルダを作れません: {error}")
+                    self._Sweep(workDir)
+                    jobId, jobDir = self._MakeJobDir(workDir)
+                    record = {
+                        "id": jobId, "created_at": _Now(), "finished_at": None,
+                        "source": source, "event": event,
+                        "has_results": results is not None, "state": "running",
+                        "exit_code": None, "sets": None, "needs_review": None,
+                        "error": None, "warnings": [], "logs": [],
+                        "progress": None, "worker_version": probe.version,
+                        "export": None,
+                    }
+                    run = _Run(record, jobDir, workDir)
+                    try:
+                        os.makedirs(os.path.join(jobDir, OUT_DIR),
+                                    exist_ok=True)
+                        if results is not None:
+                            self._WriteFile(jobDir, RESULTS_FILE, results)
+                        # Before job.json says it runs: what fails here
+                        # leaves no job that runs without a worker.
+                        arguments = self._Arguments(
+                            run, self._WriteTemplates(jobDir, templates),
+                            probe.features)
+                        self._WriteRecord(jobDir, record)
+                    except OSError as error:
+                        raise ArchiveError(WORK_DIR_UNUSABLE,
+                                           f"作業フォルダに書けません: {error}")
+                    logger.info(f"Archive: job {jobId} created")
+                    self._Start(run, probe, arguments, lanes)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     def Resume(self, jobId):
         """Run job `jobId` again (the worker resumes from its caches) ->
@@ -2269,60 +2321,73 @@ class ArchiveJobService:
             swaps = self._swaps
             probe = self._Available()
             templates = ArchiveTemplates.WorkerTemplates()
-            with self._lock:
-                if self._Swapped(swaps, again):
-                    continue
-                self._Refuse()
-                record = self._Rerunnable(jobDir, jobId, reanalysis)
-                record["source"] = self._ResumableSource(record, reanalysis)
-                record.update(state="running", finished_at=None, exit_code=None,
-                              sets=None, needs_review=None, error=None,
-                              warnings=[], logs=[], progress=None,
-                              worker_version=probe.version)
-                if reanalysis:
-                    record["has_results"] = True
-                run = _Run(record, jobDir, workDir)
-                pending = os.path.join(jobDir, RESULTS_FILE + ".new")
-                final = os.path.join(jobDir, RESULTS_FILE)
-                previous = None
-                swapped = False
-                try:
-                    os.makedirs(os.path.join(jobDir, OUT_DIR), exist_ok=True)
+            lanes = run = None
+            try:
+                with self._lock:
+                    if self._Swapped(swaps, again):
+                        continue
+                    self._Refuse()
+                    # The job's own refusals (gone, done, its video gone
+                    # ...) before the heavy lane's BUSY.
+                    record = self._Rerunnable(jobDir, jobId, reanalysis)
+                    record["source"] = self._ResumableSource(record,
+                                                             reanalysis)
+                    lanes = self._ClaimLane()
+                    record.update(state="running", finished_at=None,
+                                  exit_code=None, sets=None,
+                                  needs_review=None, error=None, warnings=[],
+                                  logs=[], progress=None,
+                                  worker_version=probe.version)
                     if reanalysis:
-                        # Written aside: results.json is replaced only once
-                        # what can fail before job.json is written has not.
-                        self._WriteFile(jobDir, RESULTS_FILE + ".new",
-                                        results)
-                    # Before job.json says it runs: what fails here leaves no
-                    # job that runs without a worker.
-                    templateFiles = self._WriteTemplates(jobDir, templates)
+                        record["has_results"] = True
+                    run = _Run(record, jobDir, workDir)
+                    pending = os.path.join(jobDir, RESULTS_FILE + ".new")
+                    final = os.path.join(jobDir, RESULTS_FILE)
+                    previous = None
+                    swapped = False
+                    try:
+                        os.makedirs(os.path.join(jobDir, OUT_DIR),
+                                    exist_ok=True)
+                        if reanalysis:
+                            # Written aside: results.json is replaced only once
+                            # what can fail before job.json is written has not.
+                            self._WriteFile(jobDir, RESULTS_FILE + ".new",
+                                            results)
+                        # Before job.json says it runs: what fails here
+                        # leaves no job that runs without a worker.
+                        templateFiles = self._WriteTemplates(jobDir, templates)
+                        if reanalysis:
+                            try:
+                                with open(final, "rb") as file:
+                                    previous = file.read()
+                            except FileNotFoundError:
+                                previous = None
+                            os.replace(pending, final)
+                            swapped = True
+                        # After the replace: --results names the file.
+                        arguments = self._Arguments(run, templateFiles,
+                                                    probe.features)
+                        self._WriteRecord(jobDir, record)
+                    except OSError as error:
+                        self._DiscardResultsSwap(jobDir, pending, final,
+                                                 previous, swapped)
+                        raise ArchiveError(WORK_DIR_UNUSABLE,
+                                           f"作業フォルダに書けません: {error}")
                     if reanalysis:
-                        try:
-                            with open(final, "rb") as file:
-                                previous = file.read()
-                        except FileNotFoundError:
-                            previous = None
-                        os.replace(pending, final)
-                        swapped = True
-                    # After the replace: --results names the file.
-                    arguments = self._Arguments(run, templateFiles,
-                                                probe.features)
-                    self._WriteRecord(jobDir, record)
-                except OSError as error:
-                    self._DiscardResultsSwap(jobDir, pending, final,
-                                             previous, swapped)
-                    raise ArchiveError(WORK_DIR_UNUSABLE,
-                                       f"作業フォルダに書けません: {error}")
-                if reanalysis:
-                    # job.json says it runs: what the new sets replace goes.
-                    self._ClearDerived(jobDir, jobId)
-                if reanalysis:
-                    logger.info(f"Archive: job {jobId} analysed again with "
-                                f"results ({len(results['sets'])} sets)")
-                else:
-                    logger.info(f"Archive: job {jobId} resumed")
-                self._Start(run, probe, arguments)
-                return self._RunView(jobId)
+                        # job.json says it runs: what the new sets replace
+                        # goes.
+                        self._ClearDerived(jobDir, jobId)
+                    if reanalysis:
+                        logger.info(f"Archive: job {jobId} analysed again "
+                                    f"with results ({len(results['sets'])} "
+                                    f"sets)")
+                    else:
+                        logger.info(f"Archive: job {jobId} resumed")
+                    self._Start(run, probe, arguments, lanes)
+                    return self._RunView(jobId)
+            except BaseException:
+                self._GiveLaneBack(lanes, run)
+                raise
 
     def _DiscardResultsSwap(self, jobDir, pending, final, previous, swapped):
         """A reanalysis that failed before job.json was written: remove the
@@ -2556,46 +2621,129 @@ class ArchiveJobService:
         return arguments + ["--no-cut", "--thumbs", *templates, "--progress",
                             "json", "--cancel-on-stdin"]
 
-    def _Start(self, run, probe, arguments):
-        """Start the worker for `run` with `arguments` (_Arguments', made
-        before job.json said it runs) and its two readers (under _lock).
-        When it cannot be started the job ends failed and
-        ArchiveError(UNAVAILABLE) is raised."""
+    # ── the heavy lane (ADR-009 D6) ────────────────────────────────────
+
+    def _Runner(self):
+        return self._runner if self._runner is not None \
+            else PluginRunner.instance
+
+    def _Lanes(self):
+        return self._lanes if self._lanes is not None \
+            else PluginJobs.instance
+
+    def _ClaimLane(self):
+        """Take PluginJobs' heavy lane for a start (under _lock) -> the
+        PluginJobs it was taken from (None when there is none: a test's
+        service). Raises ArchiveError(BUSY) while a plugin's run holds
+        it."""
+        lanes = self._Lanes()
+        if lanes is None:
+            return None
+        if not lanes.Claim(T.Lane.HEAVY, BUILTIN_PLUGIN_ID):
+            raise ArchiveError(BUSY, PLUGIN_BUSY)
+        return lanes
+
+    @staticmethod
+    def _GiveLaneBack(lanes, run):
+        """A start refused after its claim: the lane back, unless the run
+        it made started (its end gives it back). Not under _lock (the
+        release calls PluginJobs' onLaneFreed, outside every lock of
+        theirs). Never raises."""
+        if lanes is None or (run is not None and run.started):
+            return
         try:
-            run.logFile = open(os.path.join(run.jobDir, LOG_FILE), "a",
-                               encoding="utf-8")
-            what = "export start" if run.kind == EXPORT else "start"
-            run.logFile.write(f"--- {_Now()} {what} ---\n")
-            run.logFile.flush()
+            lanes.Release(T.Lane.HEAVY, BUILTIN_PLUGIN_ID)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "Archive: the heavy lane could not be given back")
+
+    def _ReleaseLane(self, run):
+        """A run's end: the lane it holds back, once (not under _lock: the
+        release calls PluginJobs' onLaneFreed). Never raises."""
+        with self._lock:
+            lanes = run.lanes if run.laneHeld else None
+            run.laneHeld = False
+        if lanes is None:
+            return
+        try:
+            lanes.Release(T.Lane.HEAVY, BUILTIN_PLUGIN_ID)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "Archive: the heavy lane could not be given back")
+
+    # ── the run ────────────────────────────────────────────────────────
+
+    def _Start(self, run, probe, arguments, lanes):
+        """Start the worker for `run` with `arguments` (_Arguments', made
+        before job.json said it runs) on the runner, holding the heavy lane
+        the caller took from `lanes` (under _lock: the run's end, which
+        takes it, waits until the run is set). When it cannot be started
+        the job ends failed and ArchiveError(UNAVAILABLE) is raised (the
+        caller gives the lane back)."""
+        logPath = os.path.join(run.jobDir, LOG_FILE)
+        self._TurnOverLog(run, logPath)
+        try:
+            with open(logPath, "a", encoding="utf-8") as logFile:
+                what = "export start" if run.kind == EXPORT else "start"
+                logFile.write(f"--- {_Now()} {what} ---\n")
         except OSError:
             logger.opt(exception=True).warning(
                 f"Archive: {LOG_FILE} of {run.record['id']} cannot be written")
-            run.logFile = None
-        try:
-            run.worker = self._launch(probe.command, arguments)
-        except Exception as error:
+        handle = None
+        detail = None
+        runner = self._Runner()
+        if runner is not None:
+            try:
+                handle = runner.Start(
+                    ArchiveWorker.RunSpec(probe.command, arguments, logPath),
+                    lambda event: self._OnEvent(run, event),
+                    lambda outcome: self._Finish(run, outcome))
+            except Exception as error:
+                # The runner never raises; what made its spec may (the
+                # working directory gone).
+                detail = f"{type(error).__name__}: {error}"
+                logger.opt(exception=True).warning(
+                    f"Archive: job {run.record['id']}: no launch")
+        if handle is None or handle.pid is None or run.launchEnded:
             self._Forget()
-            message = f"切り抜きワーカーを起動できません: {error}"
+            if handle is not None:
+                detail = handle.launch_error
+            message = (f"切り抜きワーカーを起動できません: {detail}" if detail
+                       else "切り抜きワーカーを起動できません。")
             self._Settle(run, state="failed", finished_at=_Now(), error={
                 "code": "launch", "message": message, "hint": None})
-            self._CloseLog(run)
             try:
                 self._WriteRecord(run.jobDir, run.record)
             except OSError:
                 logger.opt(exception=True).warning(
                     f"Archive: job {run.record['id']} could not be written")
             logger.warning(f"Archive: job {run.record['id']}: the worker "
-                           f"could not be started: {error}")
+                           f"could not be started")
             raise ArchiveError(UNAVAILABLE, message)
-        logger.info(f"Archive: job {run.record['id']} running (pid "
-                    f"{run.worker.pid})")
+        run.handle = handle
+        run.lanes = lanes
+        run.laneHeld = lanes is not None
+        run.started = True
         self._run = run
-        run.stderrThread = threading.Thread(
-            target=self._ReadErrors, args=(run,), daemon=True,
-            name="AutonaArchiveWorkerLog")
-        run.stderrThread.start()
-        threading.Thread(target=self._ReadOutput, args=(run,), daemon=True,
-                         name="AutonaArchiveWorker").start()
+        logger.info(f"Archive: job {run.record['id']} running (pid "
+                    f"{handle.pid})")
+
+    @staticmethod
+    def _TurnOverLog(run, logPath):
+        """Before a run: a worker.log of half the runner's limit or more
+        (every run of the job appends to it; past the limit the runner
+        drops the rest) becomes worker.log.1 (one generation, replaced), so
+        a run always has room for its own lines. Never raises."""
+        try:
+            if os.path.getsize(logPath) < T.WORKER_LOG_MAX_BYTES // 2:
+                return
+            os.replace(logPath, logPath + LOG_OLD_SUFFIX)
+        except FileNotFoundError:
+            return
+        except OSError:
+            logger.opt(exception=True).warning(
+                f"Archive: {LOG_FILE} of {run.record['id']} could not be "
+                f"turned over")
 
     @staticmethod
     def _Settle(run, **end):
@@ -2607,139 +2755,72 @@ class ArchiveJobService:
 
     @staticmethod
     def _AskCancel(run):
-        """Write ``cancel`` to the worker's stdin and close it (once), after
-        giving the worker its normal priority back (a below-normal worker on
-        a busy machine reads the line only when the CPU is given to it)."""
+        """Ask the worker to stop (once): the runner's cancel (the job's
+        priority back to normal -- a below-normal worker on a busy machine
+        reads the line only when the CPU is given to it --, ``cancel`` on
+        its stdin, stdin closed, the job ended past the grace)."""
         if run.cancelRequested:
             return
         run.cancelRequested = True
-        if run.worker is None:
-            return
-        run.worker.RaisePriority()
-        stdin = run.worker.proc.stdin
-        if stdin is None:
-            return
-        try:
-            stdin.write("cancel\n")
-            stdin.flush()
-        except (OSError, ValueError):
-            pass
-        try:
-            stdin.close()
-        except (OSError, ValueError):
-            pass
+        if run.handle is not None:
+            run.handle.Cancel()
 
-    # ── the readers ────────────────────────────────────────────────────
+    # ── the run's events and end (the runner's thread) ─────────────────
 
-    def _Log(self, run, line):
-        with run.logLock:
-            if run.logFile is None:
-                return
-            try:
-                run.logFile.write(line if line.endswith("\n")
-                                  else line + "\n")
-                run.logFile.flush()
-            except (OSError, ValueError):
-                pass
-
-    @staticmethod
-    def _CloseLog(run):
-        with run.logLock:
-            logFile, run.logFile = run.logFile, None
-        if logFile is not None:
-            try:
-                logFile.close()
-            except OSError:
-                pass
-
-    def _ReadErrors(self, run):
-        try:
-            for line in run.worker.proc.stderr:
-                self._Log(run, line)
-        except (OSError, ValueError):
-            pass
-
-    def _ReadOutput(self, run):
-        try:
-            for line in run.worker.proc.stdout:
-                self._OnLine(run, line)
-        except (OSError, ValueError):
-            logger.opt(exception=True).warning(
-                f"Archive: job {run.record['id']}: the worker's output "
-                f"stopped")
-        except Exception:
-            logger.opt(exception=True).error(
-                f"Archive: job {run.record['id']}: reading the worker failed")
-        finally:
-            self._Finish(run)
-
-    def _OnLine(self, run, line):
-        text = line.strip()
-        if not text:
-            return
-        event = None
-        if text.startswith("{"):
-            try:
-                event = json.loads(text)
-            except ValueError:
-                event = None
-        if not isinstance(event, dict) or not isinstance(
-                event.get("type"), str):
-            self._Log(run, f"[stdout] {text}")
-            return
-        kind = event["type"]
+    def _OnEvent(self, run, event):
+        """One of the worker's events (PluginRunner.ParseEvent's), read from
+        its whole line (``raw``): vodsplit's own fields are kept."""
+        kind = event.type
+        raw = event.raw
         with self._lock:
-            if kind == "stage":
+            if kind == T.EventType.STAGE:
                 previous = run.progress or {}
                 run.progress = {
-                    "stage": _Text(event.get("stage")),
-                    "label": _Text(event.get("label")),
-                    "index": _Count(event.get("index")),
-                    "count": _Count(event.get("count")),
+                    "stage": _Text(raw.get("stage")),
+                    "label": _Text(raw.get("label")),
+                    "index": _Count(raw.get("index")),
+                    "count": _Count(raw.get("count")),
                     "fraction": 0.0,
                     "overall": previous.get("overall") or 0.0,
                     "eta": None,
                 }
-            elif kind == "progress":
+            elif kind == T.EventType.PROGRESS:
                 progress = dict(run.progress or {
                     "stage": None, "label": None, "index": None,
                     "count": None, "fraction": 0.0, "overall": 0.0,
                     "eta": None})
-                if _Text(event.get("stage")):
-                    progress["stage"] = event["stage"]
+                if _Text(raw.get("stage")):
+                    progress["stage"] = raw["stage"]
                 for key in ("fraction", "overall"):
-                    value = _Number(event.get(key))
+                    value = _Number(raw.get(key))
                     if value is not None:
                         progress[key] = value
-                progress["eta"] = _Number(event.get("eta"))
+                progress["eta"] = _Number(raw.get("eta"))
                 run.progress = progress
-            elif kind == "log":
-                message = _Text(event.get("message"))
+            elif kind == T.EventType.LOG:
+                message = _Text(raw.get("message"))
                 if message is not None:
                     run.logs.append(message)
-            elif kind == "warning":
-                message = _Text(event.get("message"))
+            elif kind == T.EventType.WARNING:
+                message = _Text(raw.get("message"))
                 if message is not None and len(run.warnings) < WARNING_LINES:
                     run.warnings.append(message)
-            elif kind in ("done", "error", "cancelled"):
-                run.final = event
-            else:
-                self._Log(run, f"[stdout] {text}")
 
-    def _EndState(self, run, exitCode):
-        """(state, error) of a run that ended with `exitCode`."""
-        final = run.final or {}
+    def _EndState(self, run, outcome):
+        """(state, error) of a run that ended as `outcome` (the runner's:
+        contract_1.json's end table, ADR-009 A.6)."""
+        state = T.JobState(outcome.state)
+        final = outcome.final_raw or {}
         kind = final.get("type")
-        if exitCode == 0 and kind == "done":
+        if state is T.JobState.DONE:
             return "done", None
-        if exitCode == 130 or kind == "cancelled":
+        if state is T.JobState.CANCELLED:
             return "cancelled", None
-        if exitCode == 2 and kind == "error":
+        if state is T.JobState.ERROR:
             return "error", {"code": _Text(final.get("code")) or "error",
                              "message": _Text(final.get("message")) or "",
                              "hint": _Text(final.get("hint"))}
-        if run.cancelRequested and kind is None:
-            return "cancelled", None
+        exitCode = outcome.exit_code
         message = f"切り抜きワーカーが異常終了しました（終了コード {exitCode}）。"
         if kind == "error" and _Text(final.get("message")):
             message += f"\n{final['message']}"
@@ -2771,28 +2852,20 @@ class ArchiveJobService:
         tail = "".join(lines).strip()
         return tail[-FAILURE_TAIL_CHARS:]
 
-    def _Finish(self, run):
-        """End the job once the worker's stdout closed: wait for it, write
-        its end state, close what it held."""
-        proc = run.worker.proc
+    def _Finish(self, run, outcome):
+        """The runner's end of the run (its process and job object ended,
+        worker.log closed): the lane back, its end state written, the run
+        let go -- in that order, whatever fails. A launch that failed ends
+        in _Start instead (which holds _lock until it has seen it)."""
+        with self._lock:
+            if not run.started:
+                run.launchEnded = True
+                run.finished.set()
+                return
+        exitCode = outcome.exit_code
+        self._ReleaseLane(run)
         try:
-            exitCode = proc.wait()
-        except Exception:
-            logger.opt(exception=True).error(
-                f"Archive: job {run.record['id']}: waiting for the worker "
-                f"failed")
-            exitCode = None
-        # The worker has ended: close its job object first, which ends what
-        # it left behind (KILL_ON_JOB_CLOSE). A grandchild still holding
-        # the inherited stderr would keep its reader blocked -- and closing
-        # a stream while a thread is blocked reading it waits for that read.
-        run.worker.Close()
-        if run.stderrThread is not None:
-            run.stderrThread.join(_STDERR_JOIN_SECS)
-        self._Log(run, f"--- {_Now()} exit {exitCode} ---")
-        self._CloseLog(run)
-        try:
-            state, error = self._EndState(run, exitCode)
+            state, error = self._EndState(run, outcome)
             with self._lock:
                 record = run.record
                 end = dict(
@@ -2801,7 +2874,7 @@ class ArchiveJobService:
                     warnings=list(run.warnings),
                     progress=dict(run.progress) if run.progress else None)
                 if state == "done":
-                    final = run.final or {}
+                    final = outcome.final_raw or {}
                     if run.kind == EXPORT:
                         end.update(clips=_Count(final.get("clips")),
                                    skipped=_Count(final.get("skipped")))
@@ -2821,28 +2894,12 @@ class ArchiveJobService:
             logger.info(f"Archive: job {record['id']} {what}{state} (exit "
                         f"{exitCode})")
         finally:
-            # Closed before the run is let go: a swap (ReserveSwap) is
-            # granted once _run is None, and must find nothing of the job
-            # left running.
-            run.worker.Close()
+            # The runner closed the job object before this end: a swap
+            # (ReserveSwap), granted once _run is None, finds nothing of
+            # the job left running.
             with self._lock:
                 if self._run is run:
                     self._run = None
-            streams = [proc.stdin, proc.stdout]
-            if run.stderrThread is not None and run.stderrThread.is_alive():
-                # Still blocked reading (no job object ended the process
-                # holding it): closing it would wait for that read. Left to
-                # the daemon reader, which ends at the pipe's end.
-                logger.warning(f"Archive: job {run.record['id']}: the "
-                               f"worker's stderr is still open")
-            else:
-                streams.append(proc.stderr)
-            for stream in streams:
-                try:
-                    if stream is not None:
-                        stream.close()
-                except (OSError, ValueError):
-                    pass
             run.finished.set()
 
     # ── the shells' close ──────────────────────────────────────────────
@@ -2850,10 +2907,12 @@ class ArchiveJobService:
     def Shutdown(self, timeout=5.0):
         """Refuse new jobs, cancel the running one (an analysis or an
         export) and wait up to `timeout` seconds for it to end; then end the
-        worker and every process it started. Its job.json is written
-        cancelled (resumable; an export goes on with the next one). A
-        titles' preview's worker is killed (its request answers
-        STOPPING)."""
+        worker and every process it started (RunHandle.Kill). Its job.json
+        is written cancelled (resumable; an export goes on with the next
+        one). A titles' preview's worker is killed (its request answers
+        STOPPING). Before PluginJobs' and the runner's Shutdown (the
+        shells'): the runner's would also stop this run, and finds it
+        ended."""
         with self._lock:
             self._stopping = True
             run = self._run
@@ -2871,8 +2930,7 @@ class ArchiveJobService:
         if not run.finished.wait(timeout):
             logger.warning(f"Archive: job {run.record['id']} did not stop in "
                            f"{timeout}s; ending the worker")
-            run.worker.Kill()
+            run.handle.Kill()
             if not run.finished.wait(_KILL_WAIT_SECS):
                 logger.warning(f"Archive: job {run.record['id']}: the end "
                                f"was not written")
-        run.worker.Close()

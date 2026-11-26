@@ -375,9 +375,10 @@ Help & Settings から開く**メニューのページ**（サイドバーの項
 
 配信アーカイブ（YouTube の URL か動画ファイル）をセットごとに区切るページ（`web/src/ArchivePage/`）。解析と書き出しは Autona のプロセスでは行わず、**ワーカー**（vodsplit。別リポジトリ SmashVodSplitter）を子プロセスで動かす。決定の根拠と詳細は [ADR-006](../decisions/ADR-006-archive-clipper-worker.md)。
 
-- **core**（Qt 非依存。`bootstrap_core()` が作る）: `ArchiveWorker`（ワーカーの場所の解決・版の確認・起動。形式 `format == 1` だけを受ける）、`ArchiveJobService`（ジョブ。同時に 1 つ）、`ArchiveReview`（レビューの形・検査）、`ArchiveResults`（結果データの用意とキャラの合成）、`ArchiveTemplates` / `ArchiveThumbnails`（タイトルのテンプレートとサムネイル）、`ArchiveWorkerInstaller`（ワーカーの導入・更新）、`MatchLogService`（ボード 1 の公開を追って試合の記録を書く）。
+- **core**（Qt 非依存。`bootstrap_core()` が作る）: `ArchiveWorker`（ワーカーの場所の解決・版の確認・起動するものの組み立て。形式 `format == 1` だけを受ける）、`ArchiveJobService`（ジョブ。同時に 1 つ）、`ArchiveReview`（レビューの形・検査）、`ArchiveResults`（結果データの用意とキャラの合成）、`ArchiveTemplates` / `ArchiveThumbnails`（タイトルのテンプレートとサムネイル）、`ArchiveWorkerInstaller`（ワーカーの導入・更新）、`MatchLogService`（ボード 1 の公開を追って試合の記録を書く）。
 - **StateManager には載せない**: ページは `GET /api/v1/archive/jobs/<id>` を 1 秒ごとに読む。ファイルの置き場所は §3.3.1、v1 のルートは [external-control-api.md](external-control-api.md) §5.8。読み取りは `THIS_PC`、書き込みは `SHELL`。
 - **ワーカーの場所**: 環境変数 `AUTONA_VODSPLIT_CMD`（開発用）→ 作業フォルダの `vodsplit-worker/`。ワーカーは Autona の zip に入れず、Autona-releases の `worker-v<版>` から導入する（アップデーターは触れない。pin: `tests/test_archive_worker_install.py`）。
+- **ワーカーの起動**（ADR-009 D9）: 解析と書き出しの run は組み込みプラグイン `taguyan.vodsplit` として `PluginRunner` が起動する（ジョブオブジェクト・優先度・中止の猶予・終わりの状態の判定はランナーのもの）。実行中は重い枠を `PluginJobs` と共有し、プラグインの重い run が動いている間の開始は BUSY で断る。版の確認（probe）・自己チェック・タイトルのプレビューは `ArchiveWorker` が直接 subprocess で起動する。
 - **ページ**: ジョブの一覧と、完了したジョブのレビュー画面（プレビュー・タイムライン・詳細）。YouTube のジョブは埋め込みプレーヤー、それ以外は `<video>`。YouTube の IFrame Player API の script は読まない（Google の script が共有ビューで動くのを避けるため。実装は `archiveEmbed.ts`）。編集（確定・IN / OUT・割り当て・削除）は共有ビューでだけ有効で、ページのローカルが正、600 ms で間引いて `review.json` 全体を PUT する。
 - テスト: `tests/test_archive_*.py`（偽のワーカー `tests/fixtures/fake_vodsplit_worker.py`）、`web/src/ArchivePage/*.test.js`、`web/e2e/archive.spec.ts`。
 

@@ -701,6 +701,11 @@ class _Run:
 
     # RunHandle
 
+    @property
+    def launch_error(self) -> Optional[str]:
+        error = self.launchError
+        return str(error) if error is not None else None
+
     def Cancel(self) -> None:
         with self._lock:
             if (self.cancelRequested or self.exitedAt is not None
@@ -1123,7 +1128,8 @@ class PluginRunner:
             cancel_requested=run.cancelRequested, timed_out=run.timedOut,
             finished_before_cancel=(state is T.JobState.DONE
                                     and run.cancelRequested),
-            peak_memory_bytes=run.peak)
+            peak_memory_bytes=run.peak,
+            launch_error=str(error) if error is not None else None)
         with self._lock:
             self._runs.discard(run)
         try:

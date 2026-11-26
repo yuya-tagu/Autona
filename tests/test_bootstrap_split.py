@@ -218,9 +218,10 @@ def test_bootstrap_core_steps_and_their_order():
         "StateManagerBridge.instance.game_loaded.connect("
         "AutonaPlayerDB.SetupModel)",
         # The plugins (ADR-009 E.1): after the settings and the executor,
-        # before ArchiveJobService (its vodsplit becomes the runner's in
-        # I2), the match log (the hooks' dispatcher goes between: I5) and
-        # the shells' web server; in dependency order. Nothing started.
+        # before ArchiveJobService (its vodsplit is the runner's run on
+        # PluginJobs' heavy lane), the match log (the hooks' dispatcher goes
+        # between: I5) and the shells' web server; in dependency order.
+        # Nothing started.
         # The shell's picks (L10) before the settings that resolve them.
         "PluginRunner()",
         "ShellPicks()",
@@ -235,8 +236,8 @@ def test_bootstrap_core_steps_and_their_order():
         # (WebServer.__init__: flask after the window), not here.
         "PluginRegistry.instance.Scan()",
         # The archive clipper's jobs (ADR-006 A1): after the settings and
-        # the plugin runner, before the shells' web server; nothing read or
-        # probed here.
+        # the plugin runner and runs it is given, before the shells' web
+        # server; nothing read or probed here.
         "ArchiveJobService()",
         # The plugin runs a crash left running (E.2), after the work folder
         # it names and the scan; a job: the work folder may be a slow

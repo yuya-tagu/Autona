@@ -14,7 +14,8 @@ it alone. This module keeps its pieces from drifting apart:
   shipped) has the contract's enums, patterns, limits, environment names
   and field names, and the parts already on main implement its Protocols
   (method names and parameters);
-- the end table is ``ArchiveJobService._EndState``'s order;
+- the end table is ``PluginRunner.EndState``'s, and the archive's jobs
+  (the built-in vodsplit, ADR-009 D9) take its decision as it is;
 - ``routes_v1.json`` names fixed routes, THIS_PC only for the list and the
   icon, endpoints that no route of another class has taken;
 - the input sources' golden files are what ``MatchLogService`` writes and
@@ -667,11 +668,17 @@ def test_the_patterns_versions_and_environment_are_the_contracts():
     # What Autona adds for itself is removed (main.py sets QT_API).
     assert 'os.environ["QT_API"]' in (ROOT / "main.py").read_text(
         encoding="utf-8")
-    # The archive worker's environment adds the same two (ArchiveWorker).
-    worker = (ROOT / "src" / "core" / "ArchiveWorker.py").read_text(
-        encoding="utf-8")
-    for name in (T.ENV_PYTHONIOENCODING, T.ENV_PYINSTALLER_RESET):
-        assert f'env["{name}"]' in worker
+    # The archive worker's environment (its run, probe, self-check and
+    # titles) is the runner's for a built-in: the same subtraction, the
+    # same two added (ADR-009 D9).
+    from src.core import ArchiveWorker
+    from src.core import PluginRunner as R
+    env = ArchiveWorker._ChildEnvironment()
+    assert env == R.BuildEnvironment(
+        os.environ, pluginDir=ArchiveWorker.WorkerDir(), protocol=None,
+        secrets={}, apiUrl=None)
+    assert (env[T.ENV_PYTHONIOENCODING], env[T.ENV_PYINSTALLER_RESET]) \
+        == ("utf-8", "1")
 
 
 def test_the_limits_are_the_contracts():
@@ -847,10 +854,6 @@ class _Run:
     kind = "analysis"
     jobDir = ""
 
-    def __init__(self, final, cancel_requested):
-        self.final = {"type": final} if final else None
-        self.cancelRequested = cancel_requested
-
 
 class _Service:
     @staticmethod
@@ -859,14 +862,29 @@ class _Service:
 
 
 @pytest.mark.parametrize("cancel_requested", [False, True])
-def test_the_end_table_is_the_archive_workers_order(cancel_requested):
+def test_the_archive_jobs_end_as_the_runner_decides(cancel_requested):
+    # The built-in vodsplit's end is the runner's EndState (the contract's
+    # table); ArchiveJobService only words it (ADR-009 A.6, D9).
+    from src.core import PluginRunner as R
     from src.core.ArchiveJobService import ArchiveJobService
     for final in ("done", "error", "cancelled", None):
         for code in (0, 2, 130, 1, -1):
-            state, _error = ArchiveJobService._EndState(
-                _Service(), _Run(final, cancel_requested), code)
-            assert state == _end(final, code, cancel_requested), (
+            kind = T.EventType(final) if final else None
+            state, reason = R.EndState(
+                kind, code, cancelRequested=cancel_requested,
+                timedOut=False, launchFailed=False, entryMissing=False,
+                memoryLimitHit=False)
+            assert state.value == _end(final, code, cancel_requested), (
                 final, code, cancel_requested)
+            outcome = T.RunOutcome(
+                state=state, reason=reason, exit_code=code,
+                final_raw={"type": final} if final else None,
+                cancel_requested=cancel_requested)
+            archived, error = ArchiveJobService._EndState(
+                _Service(), _Run(), outcome)
+            assert archived == state.value, (final, code, cancel_requested)
+            assert (error is None) == (state in (T.JobState.DONE,
+                                                 T.JobState.CANCELLED))
 
 
 # ── routes ─────────────────────────────────────────────────────────────

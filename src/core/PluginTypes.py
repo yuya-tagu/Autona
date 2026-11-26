@@ -799,7 +799,9 @@ class LaunchSpec:
 class RunOutcome:
     """How a process ended (contract_1.json "end"). ``final_raw`` is the
     last terminal line's whole object (``final.raw``), kept for a built-in
-    worker's own fields."""
+    worker's own fields. ``launch_error`` is why the process was not
+    started (the runner's words, as worker.log's note has them) when
+    ``reason`` is LAUNCH_FAILED, else None."""
     state: JobState
     reason: Optional[EndReason] = None
     exit_code: Optional[int] = None
@@ -809,6 +811,7 @@ class RunOutcome:
     timed_out: bool = False
     finished_before_cancel: bool = False
     peak_memory_bytes: Optional[int] = None
+    launch_error: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -967,9 +970,14 @@ class BlockEntry:
 # ── the parts' interfaces ───────────────────────────────────────────────
 
 class RunHandle(Protocol):
-    """A started process (PluginRunner.Start)."""
+    """A started process (PluginRunner.Start). On a launch failure
+    ``launch_error`` says why (the runner's words; RunOutcome.launch_error)
+    and ``pid`` is None -- unless the process was made and then killed for
+    want of a thread; else ``launch_error`` is None. Both are set before
+    Start returns."""
 
     pid: Optional[int]
+    launch_error: Optional[str]
 
     def Cancel(self) -> None:
         """Ask the run to stop: the job's priority back to NORMAL, write

@@ -187,7 +187,9 @@ class HeadlessShell:
                 logger.error(traceback.format_exc())
         # The archive clipper's worker (ADR-006 A1), after the server (no
         # request can start a job any more): a running job is cancelled and
-        # its worker ended if it has not stopped. Short for the console
+        # its worker ended if it has not stopped (through its own handle on
+        # the runner, ADR-009 D9: the runner's Shutdown below finds it
+        # ended). Short for the console
         # close; a process ended before it is done still ends the worker
         # (the job object closes with the process).
         if ArchiveJobService.instance is not None:
