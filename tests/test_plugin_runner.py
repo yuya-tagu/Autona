@@ -3,7 +3,8 @@ docs/plugins/contract_1.json and the fake worker
 (tests/fixtures/fake_plugin_worker.py): the end table in every
 combination, the environment's subtraction, the events' rules, worker.log,
 the cancel and the time limit, the job object (grandchildren end with it,
-the priority limit reaches the descendants), describe's facts, Shutdown.
+the priority limit reaches the descendants), Kill, describe's facts,
+Shutdown.
 
 The process tests are Windows only (the host platform); the pure ones run
 everywhere. Waits that end by the worker's own cooperation get a long
@@ -882,6 +883,105 @@ def test_cancel_after_the_end_does_nothing(runner, tmp_path):
     failed.Cancel()
     assert not failed.cancelRequested
     assert not failed.Wait(LONG).cancel_requested
+
+
+# ── Kill (RunHandle.Kill: the shutdown's end after its grace) ──────────
+
+@pytest.fixture
+def patient():
+    """A grace no test reaches: only Kill can end a hang in time."""
+    made = R.PluginRunner(poll=0.02, cancelGrace=LONG * 20)
+    yield made
+    made.Shutdown(5.0)
+
+
+def _hang(runner, tmp_path):
+    childFile = tmp_path / "child.pid"
+    spec = _spec(tmp_path, "hang", FAKE_PLUGIN_CHILD_PID=childFile)
+    got = _Collect()
+    handle = runner.Start(spec, got.onEvent, got.onEnd)
+    child = _read_pid(childFile)
+    assert _until(lambda: _started(got))
+    return spec, got, handle, child
+
+
+@windows
+def test_kill_ends_the_run_and_its_grandchild_once(patient, tmp_path):
+    spec, got, handle, child = _hang(patient, tmp_path)
+    pid = handle.pid
+    handle.Kill()
+    handle.Kill()  # again: nothing more
+    outcome = handle.Wait(LONG)
+    assert outcome is not None, "Kill did not end the run"
+    # Not a cancel: the table's end for a killed process.
+    assert (outcome.state, outcome.reason, outcome.exit_code) == (
+        "failed", "abnormal_exit", R.KILLED_EXIT_CODE)
+    assert not outcome.cancel_requested
+    assert _gone(pid) and _gone(child), "the job outlived Kill"
+    handle.Kill()  # after the end: harmless
+    assert got.ends == [outcome]
+    assert got.endThread is handle.stdoutThread
+    log = Path(spec.log_path).read_text(encoding="utf-8")
+    assert log.count(R.HOST_STOPPED_NOTE) == 1
+
+
+@windows
+def test_kill_after_a_cancel_is_cancelled(patient, tmp_path):
+    _, got, handle, child = _hang(patient, tmp_path)
+    handle.Cancel()
+    assert _until(lambda: handle.cancelSent)
+    handle.Kill()
+    outcome = handle.Wait(LONG)
+    assert outcome is not None, "Kill did not end the run"
+    assert (outcome.state, outcome.exit_code) == ("cancelled",
+                                                  R.KILLED_EXIT_CODE)
+    assert outcome.cancel_requested and outcome.final is None
+    assert _gone(child)
+    assert len(got.ends) == 1
+
+
+@windows
+def test_kill_does_not_wait_for_a_held_callback(patient, tmp_path):
+    # The run's thread is held in onEvent: Kill still ends the process
+    # from the calling thread; the end follows once the callback returns.
+    release = threading.Event()
+    held = threading.Event()
+    got = _Collect()
+
+    def onEvent(event):
+        got.onEvent(event)
+        if event.type == "stage":
+            held.set()
+            release.wait(LONG)
+
+    handle = patient.Start(_spec(tmp_path, "hang"), onEvent, got.onEnd)
+    assert held.wait(LONG)
+    pid = handle.pid
+    handle.Kill()
+    assert _gone(pid), "Kill waited for the callback"
+    assert handle.Wait(0.2) is None and not got.ends
+    release.set()
+    outcome = handle.Wait(LONG)
+    assert outcome is not None and outcome.exit_code == R.KILLED_EXIT_CODE
+    assert len(got.ends) == 1
+
+
+@windows
+def test_kill_after_the_end_does_nothing(runner, tmp_path):
+    spec = _spec(tmp_path, "ok")
+    got = _Collect()
+    handle = runner.Start(spec, got.onEvent, got.onEnd)
+    outcome = handle.Wait(LONG)
+    handle.Kill()
+    handle.Kill()
+    assert (outcome.state, outcome.exit_code) == ("done", 0)
+    assert handle.Wait(LONG) is outcome and got.ends == [outcome]
+    assert R.HOST_STOPPED_NOTE not in Path(spec.log_path).read_text(
+        encoding="utf-8")
+    failed = runner.Start(_spec(tmp_path / "b", argv=(
+        str(tmp_path / "missing.exe"),)), lambda e: None, lambda o: None)
+    failed.Kill()
+    assert failed.Wait(LONG).state == "failed"
 
 
 @windows

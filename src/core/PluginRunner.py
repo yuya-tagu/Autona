@@ -33,6 +33,14 @@ A run (``Start``) gets stdin, stdout and stderr as pipes:
   came first: from then on the time limit does not apply (the grace
   does), so a send that cannot be taken back may still end ``done``.
   ``Cancel`` after the run has ended does nothing (no cancel_requested).
+  ``RunHandle.Kill`` ends the run's job at once, from the calling thread
+  (the run's own may be held in a callback), with the same note: the
+  shutdown's end after its grace (PluginJobs.Shutdown) without waiting for
+  CANCEL_GRACE_SECONDS. It is not a cancel: the end is decided by the
+  table as for the grace's kill -- cancelled when a cancel was requested
+  before (or the worker said so), else failed / abnormal_exit (exit code
+  KILLED_EXIT_CODE) -- and onEnd comes once, on the run's thread, as
+  always. Calling it again, or after the end, does nothing more.
 - stdout is read on the run's thread (``_Pump``), without blocking (the
   pipe is peeked), so the same thread also keeps the time limit, the cancel
   grace and the process's end: once the process has ended its job is
@@ -658,7 +666,8 @@ class _Run:
     """One started process (``RunHandle``). The run's thread owns the
     process: stdin, the job's limit, the kill at the grace and the end.
     ``Cancel`` (any thread) only marks the run under ``_lock`` and wakes
-    that thread."""
+    that thread; ``Kill`` (any thread) ends the job itself, then wakes
+    it."""
 
     def __init__(self, runner, spec, onEvent, onEnd):
         self._runner = runner
@@ -699,6 +708,17 @@ class _Run:
                     or self.finished.is_set()):
                 return  # asked already, or ended: nothing to stop
             self.cancelRequested = True
+        self.wake.set()
+
+    def Kill(self) -> None:
+        with self._lock:
+            if (self.proc is None or self.exitedAt is not None
+                    or self.finished.is_set()):
+                return  # not started, or ended: nothing to kill
+        # Here, not on the run's thread: that one may be held in onEvent.
+        # Terminating an ended job is harmless; the job's lock keeps a
+        # closed handle unused.
+        self._runner._HostKill(self, force=True)
         self.wake.set()
 
     def Wait(self, timeout: Optional[float] = None) -> Optional[T.RunOutcome]:
@@ -924,9 +944,9 @@ class PluginRunner:
                 pass
 
     def _HostKill(self, run, force=False):
-        """End the run's job (the grace passed, Shutdown, a failed read),
-        noting it once in worker.log. ``force`` kills again even when it
-        was noted (the process may still be there)."""
+        """End the run's job (the grace passed, Kill, Shutdown, a failed
+        read), noting it once in worker.log. ``force`` kills again even
+        when it was noted (the process may still be there)."""
         with run._lock:
             first = not run.killed
             run.killed = True
