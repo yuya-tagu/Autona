@@ -237,7 +237,8 @@ RENDER_CONTRACT = 2
 
 class _Ticket:
     """One render: what to draw and who wants it."""
-    __slots__ = ("payload", "templateId", "done", "ownLoad", "started",
+    __slots__ = ("payload", "templateId", "done", "ownLoad", "awaitsLoad",
+                 "loadAfterEnd", "started",
                  "number", "ready", "painted", "marked", "markSeen",
                  "frameDeadline", "begun", "readyAt", "paintedAt",
                  "paintDetails", "held", "contract", "timedOut")
@@ -255,6 +256,14 @@ class _Ticket:
         # Its page was loaded for it. A load on its way when it came was
         # begun for another (at construction, or for a render that timed out).
         self.ownLoad = False
+        # It wants another page than the one on its way when it came, and
+        # waits for that load's end to begin its own (_pump): a load on its
+        # way is never cut off by another.
+        self.awaitsLoad = False
+        # Its own load was begun just after another's end (_load_again):
+        # its end may be lost the same way (see the class's notes), so it is
+        # stopped and forgotten at its timeout, not left for the next render.
+        self.loadAfterEnd = False
         # Its script is running in the page; under this number.
         self.started = False
         self.number = 0
@@ -292,7 +301,19 @@ class AutonaOffscreenRenderer(QObject):
       was running the page is loaded again, so that the script cannot report
       ready to the next one. If its page was still loading the load goes on:
       cut off every time, a page that takes longer than that would never
-      arrive, and the next render takes it from there.
+      arrive, and the next render takes it from there. A render that took
+      over a load on its way (it did not begin it), or that began its own
+      just after another's end (_load_again), and timed out waiting for it
+      stops it and forgets it: a load whose end is never heard (see the next
+      point) would otherwise fail every render from then on.
+    - A load on its way is never cut off by another: a render that wants
+      another page waits for its end (whatever it is) and then loads its own,
+      with a stage of its own for it.
+      QtWebEngine (6.11, measured) reports, for a load begun while the one
+      before was taking its response, the end of the one before (with its
+      URL, failed or even succeeded) and nothing for the new one, whose
+      document is then there all the same: the render waiting for it never
+      heard it (tests/test_result_render.py's page that never loads, on CI).
     - A load that fails is tried again by the render waiting for it, if that
       render did not begin it: one that took over a load begun for another (at
       construction, or for a render that timed out) would otherwise wait out
@@ -300,8 +321,8 @@ class AutonaOffscreenRenderer(QObject):
       that fails is not tried again (a page that is not there is not loaded
       over and over): its timeout ends it, and the next render tries.
     - Whether a load ended is only believed of the newest one: the load
-      number in its URL tells it from one it replaced, whose end may still be
-      on its way.
+      number in its URL tells it from one stopped and forgotten, whose end
+      may still be on its way.
     - A render that cannot be started fails like any other, through its
       taker, once.
     - The picture is taken once the page has painted the drawing, not when
@@ -370,7 +391,11 @@ class AutonaOffscreenRenderer(QObject):
     # render that will want it. Otherwise the first render's page is the first.
     LOAD_AT_START = True
 
-    # How long a render may wait for its page, and then for its script (each).
+    # How long a render may wait for its page, then for its script, and then
+    # for its picture (each: the picture's wait for its frame is not what a
+    # slow script left of the script's, _wait_for_paint). A render whose page
+    # it loads only after another load's end has waited one stage for that
+    # end, and has another for its own load (_load_again).
     STAGE_TIMEOUT_MS = 10000
     # At a contract 2 render's timeout: how long its page's errors are
     # waited for (_on_timeout).
@@ -677,8 +702,9 @@ class AutonaOffscreenRenderer(QObject):
                 f"no preview listener to load the {self.LOG_NAME.lower()} "
                 "template from")
         url = self._page_url(origin, page)
-        # The page does not read it: it tells this load from the one it
-        # replaces, which may be the same page.
+        # The page does not read it: it tells this load from the ones before,
+        # which may be the same page (an end of one stopped and forgotten may
+        # still come).
         self._load_number += 1
         self._load_query = f"load={self._load_number}"
         url.setQuery(self._load_query)
@@ -766,9 +792,15 @@ class AutonaOffscreenRenderer(QObject):
                 # Another template's, or its load failed, or it came from a
                 # preview listener that is not the one serving now (none:
                 # the load refuses), or it is not its package's page any
-                # more (_stale): this one tries again.
-                ticket.ownLoad = True
-                self._load_template(ticket.templateId)
+                # more (_stale): this one tries again -- once the load on its
+                # way, if one is, has ended (never cut off: see the class's
+                # notes; _on_loading_changed begins this one's then). With no
+                # preview listener it is refused now, not timed out later.
+                if self._load_query is not None                         and self._preview_origin() is not None:
+                    ticket.awaitsLoad = True
+                else:
+                    ticket.ownLoad = True
+                    self._load_template(ticket.templateId)
             elif self._page_loaded:
                 self._start_render(ticket)
             # Otherwise its page is on its way: _on_loading_changed starts it.
@@ -827,14 +859,23 @@ class AutonaOffscreenRenderer(QObject):
         if status == QWebEngineLoadingInfo.LoadStatus.LoadStartedStatus:
             return
         if info.url().query() != self._load_query:
-            # A load that was replaced: its document is not (or not for long)
-            # the one a render would be given.
+            # A load stopped and forgotten (_abandon_load): its document is
+            # not (or not for long) the one a render would be given.
             return
 
         self._load_query = None
-        if status != QWebEngineLoadingInfo.LoadStatus.LoadSucceededStatus:
+        succeeded = status == QWebEngineLoadingInfo.LoadStatus.LoadSucceededStatus
+        if not succeeded:
             logger.error(f"Failed to load {self.LOG_NAME.lower()} HTML template")
-            ticket = self._active
+        ticket = self._active
+        if ticket is not None and ticket.awaitsLoad:
+            # It waited for this load's end to begin its own, whatever the
+            # end. Out of the signal: a load grabs the view.
+            ticket.awaitsLoad = False
+            self._page_loaded = succeeded
+            QTimer.singleShot(0, self, lambda: self._load_again(ticket))
+            return
+        if not succeeded:
             if ticket is not None and not ticket.started \
                     and not ticket.ownLoad:
                 # It came while the load was on its way, begun for another: it
@@ -850,7 +891,6 @@ class AutonaOffscreenRenderer(QObject):
             f"{self.LOG_NAME} HTML template loaded (one-time init complete)")
         self._page_loaded = True
 
-        ticket = self._active
         if ticket is not None and not ticket.started \
                 and ticket.templateId == self._template_id:
             try:
@@ -860,10 +900,15 @@ class AutonaOffscreenRenderer(QObject):
 
     def _load_again(self, ticket):
         """The try of a render whose page was on its way when it came, begun
-        for another, and failed (_on_loading_changed)."""
+        for another, and failed; or of one that wanted another page than the
+        one on its way, now ended (_on_loading_changed)."""
         if ticket is not self._active:
             return  # Its watchdog ended it meanwhile.
         ticket.ownLoad = True
+        ticket.loadAfterEnd = True
+        # A stage of its own for its load: the one it waited in is spent
+        # (right after startup, the default template's load took it).
+        self._watchdog.start(self.STAGE_TIMEOUT_MS)
         try:
             self._load_template(ticket.templateId)
         except Exception as error:
@@ -959,6 +1004,15 @@ class AutonaOffscreenRenderer(QObject):
         self._finish(ticket, None, self._template_error(errors))
 
     def _wait_for_paint(self, ticket):
+        # The picture's stage (the page said its script is done): its wait
+        # for the frame (_frame_wait_ms) is FRAME_WAIT_MS, not what a slow
+        # script left of its own stage. Under load on CI a first page's
+        # script took 6 s of 10, the frame wait got 2.5 s and the mark was
+        # not seen, and the view showed later drawings after 3.1 s. Not once
+        # its time is over (a contract 2 "ok" heard while its errors are read,
+        # _on_timeout): that would give it another stage.
+        if not ticket.timedOut:
+            self._watchdog.start(self.STAGE_TIMEOUT_MS)
         QTimer.singleShot(self.PAINT_WAIT_MS,
                           lambda: self._painted(ticket, "late"))
         try:
@@ -1212,11 +1266,31 @@ class AutonaOffscreenRenderer(QObject):
                 self._load_query = None
                 logger.warning(f"{self.LOG_NAME}: no preview listener to "
                                "load the page again from")
+        elif self._load_query is not None                 and (not ticket.ownLoad or ticket.loadAfterEnd):
+            # It waited a whole stage for a load it did not begin (begun for
+            # another, or the one it waited for to end to load its own), or
+            # for its own begun just after another's end: either may never be
+            # heard of (see the class's notes). Stopped and forgotten, the
+            # next render loads its own.
+            self._abandon_load()
         # Otherwise no script ran, and the page goes on loading for the next.
         if errors:
             self._finish(ticket, None, self._template_error(errors))
             return
         self._finish(ticket, None, "the render timed out")
+
+    def _abandon_load(self):
+        """Forget the load on its way, and stop it: an end of it heard later
+        is not taken for the next load's (_on_loading_changed)."""
+        logger.warning(f"{self.LOG_NAME}: the page's load did not end in "
+                       "time; stopping it")
+        self._load_query = None
+        self._page_loaded = False
+        try:
+            self._view.stop()
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"{self.LOG_NAME}: could not stop the page's load")
 
     def _finish(self, ticket, pixmap, error):
         self._active = None
