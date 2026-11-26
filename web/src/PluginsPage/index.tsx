@@ -22,7 +22,7 @@ import DevSection from "./DevSection";
 // The generic page "Plugins" (ADR-009 D4): the list of what is installed and,
 // for the one chosen, its settings, jobs, runs, logs and artifacts. The list
 // is THIS_PC (it reads anywhere); everything else is SHELL, so in a browser
-// the page only lists. Not in the registry yet: the wiring PR (I1b) adds it.
+// the page only lists (and only on this PC: the list is THIS_PC).
 
 function PluginsContent({api}: {api: PluginsApi}) {
     const {language} = usePanelShell();

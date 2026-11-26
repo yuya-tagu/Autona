@@ -21,9 +21,16 @@ export function refusalText(error: unknown): string {
     if (!key || !i18n.exists(key)) {
         return i18n.t("plugins_failed");
     }
-    const detail = (error as {detail?: string} | null)?.detail;
-    return String(reason).toLowerCase() === "busy" && detail
-        ? `${i18n.t(key)} (${detail})` : i18n.t(key);
+    if (String(reason).toLowerCase() === "busy") {
+        // The message is the whole seconds left when the host knows, else
+        // empty (or text the page does not show).
+        const detail = String(
+            (error as {detail?: string} | null)?.detail ?? "").trim();
+        if (/^\d+$/.test(detail) && Number(detail) > 0) {
+            return i18n.t("plugins_refuse_busy_left", {seconds: detail});
+        }
+    }
+    return i18n.t(key);
 }
 
 // A shell request (a pick) that did not come back with a pick, or null when
