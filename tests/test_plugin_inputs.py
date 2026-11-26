@@ -425,3 +425,125 @@ def test_nothing_is_read_or_written_on_construction(host):
     assert not host.root.joinpath("out").exists()
     assert not host.root.joinpath("work").exists()
     assert host.calls == []
+
+
+# ── review follow-ups ──────────────────────────────────────────────────
+
+ODD_NAME = "Cup Two Three\x85Four"
+
+
+def test_a_line_breaks_only_at_newline(host):
+    # U+2028 / U+2029 / U+0085 in a name are not line ends.
+    odd = OTHER.replace("Other Cup", ODD_NAME)
+    host.write_log(DAY, [odd, OTHER])
+    placed = host.prepare("log", FieldType.MATCH_LOG,
+                          _pick("log", FieldType.MATCH_LOG, choice=DAY))
+    assert Path(placed.path).read_bytes() \
+        == (odd + "\n" + OTHER + "\n").encode("utf-8")
+    choices = host.inputsService.Choices(FieldType.MATCH_LOG)
+    assert f"{DAY}/{ODD_NAME}" in [c.id for c in choices]
+    picked = host.prepare("log", FieldType.MATCH_LOG, _pick(
+        "log", FieldType.MATCH_LOG, choice=f"{DAY}/{ODD_NAME}"))
+    assert Path(picked.path).read_bytes() == (odd + "\n").encode("utf-8")
+
+
+def test_crlf_lines_are_read_as_lines(host):
+    host.log.mkdir(parents=True)
+    (host.log / f"{DAY}.jsonl").write_bytes(
+        (OTHER + "\r\n").encode("utf-8"))
+    placed = host.prepare("log", FieldType.MATCH_LOG,
+                          _pick("log", FieldType.MATCH_LOG, choice=DAY))
+    assert Path(placed.path).read_bytes() == (OTHER + "\n").encode("utf-8")
+
+
+def test_a_days_choices_are_read_again_only_when_its_file_changed(host):
+    host.write_log(DAY, _golden_lines())
+    host.write_log("20261120", [OTHER])
+    service = host.inputsService
+    reads = []
+    real = service._ReadLog
+
+    def counting(day):
+        reads.append(day)
+        return real(day)
+    service._ReadLog = counting
+    first = service.Choices(FieldType.MATCH_LOG)
+    assert sorted(reads) == ["20261120", DAY]
+    reads.clear()
+    assert service.Choices(FieldType.MATCH_LOG) == first
+    assert reads == []
+    # The writer appends: that day only is read again.
+    with open(host.log / f"{DAY}.jsonl", "ab") as file:
+        file.write((OTHER + "\n").encode("utf-8"))
+    choices = service.Choices(FieldType.MATCH_LOG)
+    assert reads == [DAY]
+    assert (f"{DAY}/Other Cup", "2026-11-26 Other Cup", "1") in [
+        (c.id, c.label, c.detail) for c in choices]
+    # A day removed leaves the cache.
+    (host.log / "20261120.jsonl").unlink()
+    service.Choices(FieldType.MATCH_LOG)
+    assert "20261120" not in service._dayChoices
+
+
+def test_an_image_with_a_time_out_of_range_is_left_out(host, monkeypatch):
+    host.image("results", "good.png", mtime=1_700_000_000)
+    host.image("results", "odd.png", mtime=1_600_000_000)
+    real = datetime.datetime
+
+    class Odd(real):
+        @classmethod
+        def fromtimestamp(cls, stamp, *args, **kwargs):
+            if int(stamp) == 1_600_000_000:
+                raise OverflowError("timestamp out of range")
+            return real.fromtimestamp(stamp, *args, **kwargs)
+    monkeypatch.setattr(module.datetime, "datetime", Odd)
+    choices = host.inputsService.Choices(FieldType.RESULT_IMAGE)
+    assert [choice.id for choice in choices] == ["good.png"]
+
+
+def test_the_work_folder_itself_is_not_an_inputs_folder(host):
+    host.work.mkdir(parents=True)
+    with pytest.raises(ValueError):
+        host.inputsService.Prepare("board", FieldType.STATE,
+                                   str(host.work), None)
+
+
+def _junction(link, target):
+    import subprocess
+    import sys
+    if sys.platform != "win32":
+        os.symlink(target, link, target_is_directory=True)
+        return
+    done = subprocess.run(["cmd", "/c", "mklink", "/J", str(link),
+                           str(target)], capture_output=True)
+    if done.returncode != 0:
+        pytest.skip("no junction could be made")
+
+
+def test_an_export_whose_clips_folder_leads_elsewhere_is_refused(
+        host, tmp_path):
+    job = host.work / "20261126-200000-ab12"
+    job.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "01.mp4").write_bytes(b"mp4")
+    (outside / "export.json").write_text(json.dumps({"clips": [
+        {"no": 1, "file": "01.mp4", "exported": True}]}))
+    _junction(job / "clips", outside)
+    try:
+        with pytest.raises(InputError):
+            host.prepare("export", FieldType.ARCHIVE_EXPORT, _pick(
+                "export", FieldType.ARCHIVE_EXPORT, path=str(job)))
+    finally:
+        # The junction itself, never what it leads to.
+        os.rmdir(job / "clips")
+
+
+def test_the_image_folders_are_the_render_lanes():
+    from src.core import ResultService, ThumbnailService
+    for service, name in ((ResultService, module.RESULTS_DIR),
+                          (ThumbnailService, module.THUMBNAILS_DIR)):
+        directory = service.OUTPUT_DIRECTORY
+        assert os.path.basename(directory) == name
+        assert os.path.normpath(os.path.dirname(directory)) \
+            == os.path.normpath("./out")

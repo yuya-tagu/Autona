@@ -318,3 +318,41 @@ def test_missing_without_a_required_secret_asks_no_secrets(tmp_path):
     settings = PluginSettings(str(tmp_path), secrets)
     assert settings.Missing(PLUGIN, _manifest(TEXT), dev=False) == ()
     assert secrets.asked == []
+
+
+# ── review follow-ups ──────────────────────────────────────────────────
+
+@pytest.mark.parametrize("key", ["count", "free", "ratio"])
+def test_an_integer_too_large_for_a_float_is_refused(settings, key):
+    answer = settings.Save(PLUGIN, ALL, {key: 10 ** 400}, dev=False)
+    assert isinstance(answer, Refused)
+    assert answer.reason == StartRefusal.INVALID_REQUEST
+
+
+def test_a_config_that_cannot_be_read_now_is_not_written_over(
+        settings, monkeypatch):
+    import builtins
+    settings.Save(PLUGIN, ALL, {"name": "Alice", "count": 2}, dev=False)
+    path = settings.ConfigPath(PLUGIN, dev=False)
+    with open(path, "rb") as file:
+        before = file.read()
+    real = builtins.open
+
+    def refusing(file, mode="r", *args, **kwargs):
+        if os.path.abspath(str(file)) == path and "r" in mode:
+            raise PermissionError(32, "in use by another process")
+        return real(file, mode, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", refusing)
+    with pytest.raises(OSError):
+        settings.Save(PLUGIN, ALL, {"flag": True}, dev=False)
+    # A read is "nothing saved" meanwhile.
+    assert settings.Get(PLUGIN, ALL, dev=False)["name"] is None
+    monkeypatch.undo()
+    with open(path, "rb") as file:
+        assert file.read() == before
+
+
+def test_an_unknown_keys_refusal_is_cut_short(settings):
+    answer = settings.Save(PLUGIN, ALL, {"x" * 5000: 1}, dev=False)
+    assert isinstance(answer, Refused)
+    assert len(answer.detail) < 80

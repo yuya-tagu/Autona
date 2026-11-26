@@ -60,6 +60,8 @@ _PLUGIN_ID = re.compile(PLUGIN_ID_PATTERN)
 _FIELD_KEY = re.compile(FIELD_KEY_PATTERN)
 
 _TEXT_TYPES = (FieldType.TEXT, FieldType.TEXTAREA)
+# How much of an unknown key a refusal repeats.
+_SHOWN_KEY_LENGTH = 40
 _PATH_TYPES = (FieldType.FILE, FieldType.FOLDER)
 
 # A pick id -> the absolute path it names, None when unknown.
@@ -101,16 +103,24 @@ def _Extension(path: str) -> str:
 
 
 def _Number(value) -> bool:
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # An int too large for a float (JSON allows any number of digits).
+        return False
 
 
 def _OnStep(field: Field, value) -> bool:
     if field.step is None or field.step <= 0:
         return True
     base = field.min if field.min is not None else 0
-    ratio = (value - base) / field.step
-    return abs(ratio - round(ratio)) <= 1e-9 * max(1.0, abs(ratio))
+    try:
+        ratio = (value - base) / field.step
+        return abs(ratio - round(ratio)) <= 1e-9 * max(1.0, abs(ratio))
+    except (OverflowError, ValueError):
+        return False
 
 
 def CheckFieldValue(field: Field, value: Any, *,
@@ -196,15 +206,28 @@ class PluginSettings:
         return os.path.join(UserDir(self.userDataDir, pluginId, dev=dev),
                             CONFIG_FILE)
 
-    def _Read(self, path: str) -> dict:
+    def _Read(self, path: str, *, strict: bool = False) -> dict:
+        """config.json's object; {} when there is none or it is damaged
+        (not JSON, not an object). A file that is there but cannot be read
+        now (OSError: locked, a sharing violation) is {} for a read and an
+        OSError when ``strict`` (a save: writing over it would drop the
+        other keys)."""
         try:
-            with open(path, encoding="utf-8-sig") as file:
-                data = json.load(file)
+            with open(path, "rb") as file:
+                content = file.read()
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError) as error:
+        except OSError as error:
+            if strict:
+                raise
             logger.warning(f"Plugin settings: {os.path.basename(path)} could "
                            f"not be read ({type(error).__name__})")
+            return {}
+        try:
+            data = json.loads(content.decode("utf-8-sig"))
+        except ValueError as error:
+            logger.warning(f"Plugin settings: {os.path.basename(path)} is "
+                           f"damaged ({type(error).__name__})")
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -218,7 +241,9 @@ class PluginSettings:
     def Get(self, pluginId: str, manifest: Manifest, *,
             dev: bool) -> Mapping[str, Any]:
         """Every non-secret setting key -> its saved value (when it still
-        fits), else its default, else None."""
+        fits), else its default, else None. A file / folder value is the
+        absolute path (request.json's): not for display -- a route shows
+        its basename only."""
         with self._lock:
             saved = self._Read(self.ConfigPath(pluginId, dev=dev))
         return self._Resolve(manifest, saved)
@@ -241,7 +266,10 @@ class PluginSettings:
              dev: bool) -> Union[Mapping[str, Any], Refused]:
         """Check ``values`` (a partial update) against the manifest's
         non-secret settings and save them; INVALID_REQUEST when one does not
-        fit or names no such setting. Returns what Get returns afterwards."""
+        fit or names no such setting. Returns what Get returns afterwards
+        (absolute paths: not for display, as Get). OSError, nothing
+        written, when config.json is there but cannot be read or
+        written."""
         if not isinstance(values, Mapping):
             return Refused(StartRefusal.INVALID_REQUEST,
                            detail="settings: not an object")
@@ -250,8 +278,10 @@ class PluginSettings:
         for key, value in values.items():
             field = fields.get(key) if isinstance(key, str) else None
             if field is None or not _FIELD_KEY.fullmatch(key):
+                # The body's key, cut short: it is anything a client sent.
+                shown = str(key)[:_SHOWN_KEY_LENGTH]
                 return Refused(StartRefusal.INVALID_REQUEST,
-                               detail=f"{key}: no such setting")
+                               detail=f"{shown}: no such setting")
             if field.type == FieldType.SECRET:
                 return Refused(StartRefusal.INVALID_REQUEST,
                                detail=f"{key}: a secret is saved apart")
@@ -266,7 +296,7 @@ class PluginSettings:
             checked[key] = kept
         path = self.ConfigPath(pluginId, dev=dev)
         with self._lock:
-            saved = self._Read(path)
+            saved = self._Read(path, strict=True)
             for key, value in checked.items():
                 if value is None:
                     saved.pop(key, None)

@@ -11,9 +11,10 @@ sha256 too):
 type                      file       what
 ========================  =========  ========================================
 ``match_log``             .jsonl     the match log's lines (MatchLogService's,
-                                     unchanged; a line that is not a JSON
-                                     object -- one a crash cut -- is left
-                                     out). Picked: one day, or one
+                                     unchanged, split on "\\n" only; a line
+                                     that is not a JSON object -- one a
+                                     crash cut -- is left out). Picked: one
+                                     day, or one
                                      tournament of it. At the trigger: the
                                      file of the open record's start date
                                      (today's when none) after the writer's
@@ -40,8 +41,10 @@ caller's INVALID_REQUEST.
 A trigger's own file (``InputPick.path``: an action's image, the export's
 job folder) is taken only inside its own folder: an image inside
 out/results or out/thumbnails (its type's), an export's job folder directly
-in the work folder. Nothing is read from anywhere else, and ``inputsDir``
-must be inside the work folder.
+in the work folder (its clips folder and clips inside it). "Inside" is
+after resolving links and junctions, and never the folder itself
+(ArchiveJobService._Under's rule). Nothing is read from anywhere else, and
+``inputsDir`` must be inside the work folder (not the work folder itself).
 
 ``archive_export`` (shape not settled by the contract: ADR-009 B.3 leaves
 it to P3 and the YouTube ADR; this is the least one, ``format`` 1, to be
@@ -73,6 +76,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from typing import Any, Callable, List, Mapping, Optional, Sequence
 
 import orjson
@@ -85,6 +89,8 @@ from .PluginTypes import (FIELD_KEY_PATTERN, INPUT_FORMATS,
 
 RESULTS_DIR = "results"
 THUMBNAILS_DIR = "thumbnails"
+# (ResultService / ThumbnailService OUTPUT_DIRECTORY under out/: held equal
+# by tests/test_plugin_inputs.py.)
 # ArchiveJobService's (not imported: it brings the whole archive along;
 # tests/test_plugin_inputs.py holds them equal).
 CLIPS_DIR = "clips"
@@ -107,11 +113,14 @@ class InputError(ValueError):
     text holds no path."""
 
 
-def _Inside(path: str, root: str) -> bool:
+def _Under(root: str, path: str) -> bool:
+    """Whether ``path`` resolves (links and junctions followed) inside
+    folder ``root``, and is not ``root`` itself (ArchiveJobService._Under's
+    rule)."""
     try:
-        path = os.path.normcase(os.path.realpath(path))
-        root = os.path.normcase(os.path.realpath(root))
-        return os.path.commonpath([path, root]) == root
+        real = os.path.normcase(os.path.realpath(path))
+        base = os.path.normcase(os.path.realpath(root))
+        return os.path.commonpath([base, real]) == base and real != base
     except ValueError:
         return False
 
@@ -149,6 +158,10 @@ class PluginInputs:
         self._flushMatchLog = flushMatchLog
         self._openRecordDate = openRecordDate
         self._today = today or datetime.date.today
+        # day -> ((mtime_ns, size) of its file, its choices): a day's file
+        # is read again only when it changed.
+        self._dayChoices = {}
+        self._cacheLock = threading.Lock()
 
     # ── the folders ─────────────────────────────────────────────────────
 
@@ -205,7 +218,12 @@ class PluginInputs:
                            f"not be read ({type(error).__name__})")
             return None
         lines = []
-        for raw in content.decode("utf-8", errors="replace").splitlines():
+        # Split on "\n" only, as the writer ends its lines: str.splitlines
+        # would also break a line at U+2028 / U+2029 / U+0085 in a name.
+        for chunk in content.split(b"\n"):
+            if chunk.endswith(b"\r"):
+                chunk = chunk[:-1]
+            raw = chunk.decode("utf-8", errors="replace")
             if not raw.strip():
                 continue
             try:
@@ -222,29 +240,55 @@ class PluginInputs:
         return value.strip() if isinstance(value, str) else ""
 
     def _LogChoices(self) -> Sequence[InputChoice]:
+        days = self._LogDays()
         choices = []
-        for day in self._LogDays():
-            lines = self._ReadLog(day)
-            if not lines:
-                continue
+        for day in days:
+            choices.extend(self._DayChoices(day))
+        with self._cacheLock:
+            for gone in set(self._dayChoices) - set(days):
+                del self._dayChoices[gone]
+        return tuple(choices)
+
+    def _DayChoices(self, day: str):
+        """A day's choices: the cached ones while its file's (mtime_ns,
+        size) is the same, else read again."""
+        try:
+            stat = os.stat(os.path.join(self.matchLogDir, f"{day}.jsonl"))
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            stamp = None
+        if stamp is not None:
+            with self._cacheLock:
+                cached = self._dayChoices.get(day)
+            if cached is not None and cached[0] == stamp:
+                return cached[1]
+        lines = self._ReadLog(day)
+        choices = ()
+        if lines:
             # tournament -> its record ids, in the order they began.
             records = {}
             for _raw, record in lines:
                 records.setdefault(self._Tournament(record), set()).add(
                     record.get("id"))
             total = len({record.get("id") for _raw, record in lines})
-            choices.append(InputChoice(id=day, label=_IsoDay(day),
-                                       detail=str(total)))
-            for name, ids in records.items():
-                choices.append(InputChoice(
+            choices = (InputChoice(id=day, label=_IsoDay(day),
+                                   detail=str(total)),) + tuple(
+                InputChoice(
                     id=f"{day}/{name}",
                     label=f"{_IsoDay(day)} {name or NO_TOURNAMENT_LABEL}",
-                    detail=str(len(ids))))
-        return tuple(choices)
+                    detail=str(len(ids)))
+                for name, ids in records.items())
+        with self._cacheLock:
+            if stamp is None:
+                self._dayChoices.pop(day, None)
+            else:
+                self._dayChoices[day] = (stamp, choices)
+        return choices
 
     def _ImageFiles(self, kind: FieldType):
-        """[(mtime, name)] of the images of ``kind``'s folder, newest
-        first."""
+        """[(mtime, name, shown time)] of the images of ``kind``'s folder,
+        newest first. A file whose time cannot be shown (out of range) is
+        left out, the others stay."""
         folder = self.ImageDir(kind)
         try:
             entries = list(os.scandir(folder))
@@ -263,20 +307,20 @@ class PluginInputs:
             try:
                 if entry.is_symlink() or not entry.is_file():
                     continue
-                files.append((entry.stat().st_mtime, entry.name))
-            except OSError:
+                mtime = entry.stat().st_mtime
+                shown = datetime.datetime.fromtimestamp(mtime).astimezone() \
+                    .isoformat(timespec="seconds")
+            except (OSError, OverflowError, ValueError):
                 continue
+            files.append((mtime, entry.name, shown))
         return sorted(files, reverse=True)
 
     def _ImageChoices(self, kind, limit) -> Sequence[InputChoice]:
         files = self._ImageFiles(kind)
         if limit is not None:
             files = files[:limit]
-        return tuple(InputChoice(
-            id=name, label=name,
-            detail=datetime.datetime.fromtimestamp(mtime).astimezone()
-            .isoformat(timespec="seconds"))
-            for mtime, name in files)
+        return tuple(InputChoice(id=name, label=name, detail=shown)
+                     for _mtime, name, shown in files)
 
     # ── the files ───────────────────────────────────────────────────────
 
@@ -293,7 +337,7 @@ class PluginInputs:
         kind = FieldType(kind)
         if pick is not None and (pick.key != key or pick.kind != kind):
             raise ValueError("the pick is another field's")
-        if not _Inside(inputsDir, self._workDir()):
+        if not _Under(self._workDir(), inputsDir):
             raise ValueError("the inputs folder is not in the work folder")
         if kind == FieldType.MATCH_LOG:
             return self._MatchLog(key, inputsDir, pick)
@@ -378,7 +422,7 @@ class PluginInputs:
         if os.path.splitext(path)[1].lower() not in IMAGE_EXTENSIONS:
             raise InputError("not a png / jpg")
         if os.path.islink(path) or not os.path.isfile(path) \
-                or not _Inside(path, folder):
+                or not _Under(folder, path):
             raise InputError("no such image")
         return path
 
@@ -408,12 +452,16 @@ class PluginInputs:
         jobDir = os.path.abspath(pick.path)
         work = os.path.abspath(self._workDir())
         jobId = os.path.basename(jobDir)
+        # A link or a junction resolves elsewhere: _Under follows it.
         if (not _ARCHIVE_JOB_ID.fullmatch(jobId)
                 or os.path.normcase(os.path.dirname(jobDir))
                 != os.path.normcase(work)
-                or os.path.islink(jobDir) or not os.path.isdir(jobDir)):
+                or os.path.islink(jobDir) or not os.path.isdir(jobDir)
+                or not _Under(work, jobDir)):
             raise InputError("not an archive job's folder")
         clipsDir = os.path.join(jobDir, CLIPS_DIR)
+        if os.path.islink(clipsDir) or not _Under(jobDir, clipsDir):
+            raise InputError("the job has no export")
         try:
             with open(os.path.join(clipsDir, EXPORT_FILE),
                       encoding="utf-8") as file:
@@ -451,7 +499,8 @@ class PluginInputs:
                 or "\\" in name):
             return None
         path = os.path.join(clipsDir, name)
-        if os.path.islink(path) or not os.path.isfile(path):
+        if os.path.islink(path) or not os.path.isfile(path) \
+                or not _Under(clipsDir, path):
             return None
 
         def number(value):

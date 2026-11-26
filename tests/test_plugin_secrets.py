@@ -192,3 +192,62 @@ def test_dpapi_refuses_a_damaged_blob():
 def test_dpapi_is_an_os_error_off_windows():
     with pytest.raises(OSError):
         module.Protect(b"x")
+
+
+# ── review follow-ups ──────────────────────────────────────────────────
+
+@pytest.mark.parametrize("value", ["a\x00b", "a\tb", "a\x7fb", "a\x85b",
+                                   "a\x1bb"])
+def test_a_control_character_is_refused(secrets, value):
+    with pytest.raises(SecretValueError):
+        secrets.Set(PLUGIN, "webhook_url", value, dev=False)
+
+
+def test_text_beyond_ascii_is_a_value(secrets):
+    secrets.Set(PLUGIN, "name", "日本語   é", dev=False)
+    assert secrets.Environment(PLUGIN, dev=False)["AUTONA_SECRET_NAME"] \
+        == "日本語   é"
+
+
+def _unreadable(monkeypatch, path):
+    import builtins
+    real = builtins.open
+
+    def refusing(file, mode="r", *args, **kwargs):
+        if os.path.abspath(str(file)) == path and "r" in mode:
+            raise PermissionError(32, "in use by another process")
+        return real(file, mode, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", refusing)
+
+
+def test_a_file_that_cannot_be_read_now_is_not_written_over(
+        secrets, monkeypatch):
+    secrets.Set(PLUGIN, "webhook_url", SECRET, dev=False)
+    path = secrets.Path(PLUGIN, dev=False)
+    with open(path, "rb") as file:
+        before = file.read()
+    _unreadable(monkeypatch, path)
+    with pytest.raises(OSError):
+        secrets.Set(PLUGIN, "token", "abc", dev=False)
+    with pytest.raises(OSError):
+        secrets.Delete(PLUGIN, "webhook_url", dev=False)
+    # A read is "none set" meanwhile.
+    assert secrets.Keys(PLUGIN, dev=False) == frozenset()
+    monkeypatch.undo()
+    with open(path, "rb") as file:
+        assert file.read() == before
+    assert secrets.Keys(PLUGIN, dev=False) == {"webhook_url"}
+
+
+def test_an_undecryptable_file_is_warned_about_once(tmp_path, logged):
+    writer = PluginSecrets(str(tmp_path), protect=_flip, unprotect=_flip)
+    writer.Set(PLUGIN, "webhook_url", SECRET, dev=False)
+
+    def refuse(_data):
+        raise OSError(13, "another user's")
+
+    reader = PluginSecrets(str(tmp_path), protect=_flip, unprotect=refuse)
+    for _ in range(3):
+        reader.Keys(PLUGIN, dev=False)
+        reader.Environment(PLUGIN, dev=False)
+    assert sum("could not be decrypted" in line for line in logged) == 1

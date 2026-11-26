@@ -8,7 +8,8 @@ it does not keep them from another plugin: any process of the same user can
 decrypt it (D6). Another user or another PC cannot -- a copied folder reads
 as no secret (logged), and the user enters them again.
 
-A value is a string with no line break (``\\r`` / ``\\n``), 1 to
+A value is a string with no line break and no other control character
+(NUL, ``\\r`` / ``\\n``, tab, C1: Unicode category Cc), 1 to
 SECRET_MAX_LENGTH characters. It leaves this module only through
 ``Environment`` (``AUTONA_SECRET_<KEY in upper case>`` -> value, for
 PluginRunner.BuildEnvironment); the page sees ``Keys`` (set / not set).
@@ -28,6 +29,7 @@ import os
 import re
 import sys
 import threading
+import unicodedata
 from typing import Callable, Optional
 
 from loguru import logger
@@ -45,7 +47,6 @@ _ENTROPY = b"Autona.PluginSecrets.1"
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
 _FIELD_KEY = re.compile(FIELD_KEY_PATTERN)
-_LINE_BREAKS = ("\r", "\n")
 
 
 class SecretValueError(ValueError):
@@ -89,7 +90,8 @@ def _Dpapi(data: bytes, protect: bool) -> bytes:
                       None, None, _CRYPTPROTECT_UI_FORBIDDEN,
                       ctypes.byref(blobOut))
     finally:
-        # The plain text's copy in this buffer (protect).
+        # Clears this buffer's copy only: the bytes / str the caller holds
+        # stay in memory until collected (Python cannot wipe them).
         ctypes.memset(bufferIn, 0, len(data))
     if not ok:
         code = ctypes.get_last_error()
@@ -123,7 +125,8 @@ def CheckKey(key) -> str:
 
 
 def CheckValue(value) -> str:
-    """The B.3 rule: a string, no line break, 1..SECRET_MAX_LENGTH."""
+    """The B.3 rule: a string, no line break or other control character,
+    1..SECRET_MAX_LENGTH."""
     if not isinstance(value, str):
         raise SecretValueError("a secret is a string")
     if not value:
@@ -131,8 +134,9 @@ def CheckValue(value) -> str:
     if len(value) > SECRET_MAX_LENGTH:
         raise SecretValueError(
             f"a secret is at most {SECRET_MAX_LENGTH} characters")
-    if any(mark in value for mark in _LINE_BREAKS):
-        raise SecretValueError("a secret has no line break")
+    if any(unicodedata.category(mark) == "Cc" for mark in value):
+        raise SecretValueError(
+            "a secret has no line break or control character")
     return value
 
 
@@ -147,6 +151,8 @@ class PluginSecrets:
         self._protect = protect or Protect
         self._unprotect = unprotect or Unprotect
         self._lock = threading.Lock()
+        # (id, dev) whose file could not be decrypted, warned once each.
+        self._warned = set()
 
     def Path(self, pluginId: str, *, dev: bool) -> str:
         return os.path.join(UserDir(self.userDataDir, pluginId, dev=dev),
@@ -154,7 +160,13 @@ class PluginSecrets:
 
     # ── the file (under the lock) ───────────────────────────────────────
 
-    def _Read(self, pluginId: str, dev: bool) -> dict:
+    def _Read(self, pluginId: str, dev: bool, *,
+              strict: bool = False) -> dict:
+        """The secrets; {} when there is no file or it cannot be decrypted
+        (another user's or PC's, damaged: as if none were set). A file that
+        is there but cannot be read now (OSError: locked, a sharing
+        violation) is {} for a read and an OSError when ``strict`` (a
+        change: writing over it would drop the other keys)."""
         path = self.Path(pluginId, dev=dev)
         try:
             with open(path, "rb") as file:
@@ -162,15 +174,18 @@ class PluginSecrets:
         except FileNotFoundError:
             return {}
         except OSError as error:
+            if strict:
+                raise
             logger.warning(f"Plugin secrets: {pluginId}'s could not be read "
                            f"({type(error).__name__})")
             return {}
         try:
             data = json.loads(self._unprotect(blob).decode("utf-8"))
         except Exception as error:
-            # Another user's or PC's, or damaged: as if none were set.
-            logger.warning(f"Plugin secrets: {pluginId}'s could not be "
-                           f"decrypted ({type(error).__name__})")
+            if (pluginId, dev) not in self._warned:
+                self._warned.add((pluginId, dev))
+                logger.warning(f"Plugin secrets: {pluginId}'s could not be "
+                               f"decrypted ({type(error).__name__})")
             return {}
         if not isinstance(data, dict):
             return {}
@@ -182,9 +197,11 @@ class PluginSecrets:
         path = self.Path(pluginId, dev=dev)
         if not secrets:
             self._Remove(path)
-            return
-        plain = json.dumps(secrets, ensure_ascii=False).encode("utf-8")
-        ImageImport.WriteFile(path, self._protect(plain))
+        else:
+            plain = json.dumps(secrets, ensure_ascii=False).encode("utf-8")
+            ImageImport.WriteFile(path, self._protect(plain))
+        # A file written anew is warned about again if it ever fails.
+        self._warned.discard((pluginId, dev))
 
     @staticmethod
     def _Remove(path: str) -> None:
@@ -198,20 +215,22 @@ class PluginSecrets:
     def Set(self, pluginId: str, key: str, value: str, *,
             dev: bool) -> None:
         """Save one secret. SecretValueError (a ValueError) when the key or
-        the value does not fit; OSError when it cannot be written."""
+        the value does not fit; OSError, nothing written, when secrets.bin
+        is there but cannot be read now, or cannot be written."""
         CheckKey(key)
         CheckValue(value)
         with self._lock:
-            secrets = self._Read(pluginId, dev)
+            secrets = self._Read(pluginId, dev, strict=True)
             secrets[key] = value
             self._Write(pluginId, dev, secrets)
         logger.info(f"Plugin secrets: {pluginId}'s {key} set")
 
     def Delete(self, pluginId: str, key: str, *, dev: bool) -> None:
-        """Clear one secret (nothing when it is not set)."""
+        """Clear one secret (nothing when it is not set). OSError, nothing
+        written, as Set."""
         CheckKey(key)
         with self._lock:
-            secrets = self._Read(pluginId, dev)
+            secrets = self._Read(pluginId, dev, strict=True)
             if secrets.pop(key, None) is None:
                 return
             self._Write(pluginId, dev, secrets)
@@ -223,7 +242,9 @@ class PluginSecrets:
             return frozenset(self._Read(pluginId, dev))
 
     def Environment(self, pluginId: str, *, dev: bool) -> dict:
-        """AUTONA_SECRET_<KEY> -> value, for BuildEnvironment."""
+        """AUTONA_SECRET_<KEY> -> value, for BuildEnvironment: every key
+        saved, one the manifest no longer has too -- the caller keeps those
+        of the manifest's secret settings."""
         with self._lock:
             secrets = self._Read(pluginId, dev)
         return {EnvironmentName(key): value for key, value in secrets.items()}
@@ -232,4 +253,5 @@ class PluginSecrets:
         """Remove secrets.bin (removal, new install)."""
         with self._lock:
             self._Remove(self.Path(pluginId, dev=dev))
+            self._warned.discard((pluginId, dev))
         logger.info(f"Plugin secrets: {pluginId}'s removed")
