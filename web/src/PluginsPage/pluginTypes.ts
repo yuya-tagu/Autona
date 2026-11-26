@@ -193,3 +193,79 @@ export interface RunRequest {
 export const START_REFUSALS = [
     "busy", "needs_settings", "blocked", "disabled", "incompatible",
     "job_unusable", "invalid_request"] as const;
+
+// ---- Install, enable and removal (ADR-009 P5a; routes_v1.json types) ----
+
+export const INSTALL_STATES = [
+    "preparing", "consent", "installing", "done", "failed",
+    "cancelled"] as const;
+export type InstallState = typeof INSTALL_STATES[number];
+
+export const INSTALL_DECISIONS = [
+    "update", "confirm_same_or_older", "new_install", "refuse_dev_id",
+    "refuse_reserved"] as const;
+export type InstallDecision = typeof INSTALL_DECISIONS[number];
+
+// POST /plugins/uploads answers 201 with this.
+export interface UploadAnswer {
+    upload_id: string;
+    expires_in_sec: number;
+}
+
+// InstallFailure: `code` is contract_1.json install.errors' key, `problems`
+// the zip problems / manifest check codes / describe's failure.
+export interface InstallFailure {
+    reason: string;
+    code: string;
+    problems: string[];
+    detail: string;
+}
+
+export interface ConsentSheet {
+    id: string;
+    version: string;
+    name: PluginText;
+    author: string;
+    license: string;
+    description: PluginText | null;
+    homepage: boolean;
+    source: {kind: "github" | "manual"; name: string | null};
+    verified: boolean;
+    sha256: string;
+    zip_bytes: number;
+    size_bytes: number;
+    decision: InstallDecision;
+    needs_consent: boolean;
+    installed_version: string | null;
+    consent_digest: string;
+    permissions: PluginPermissions;
+    settings: PluginField[];
+    jobs: PluginJob[];
+}
+
+export interface InstallStatus {
+    install_id: string;
+    state: InstallState;
+    plugin_id: string | null;
+    sheet: ConsentSheet | null;
+    error: InstallFailure | null;
+}
+
+export const REMOVAL_STATES = ["idle", "removing", "failed"] as const;
+export type RemovalState = typeof REMOVAL_STATES[number];
+
+export interface RemovalInfo {
+    state: RemovalState;
+    error: InstallFailure | null;
+    data_bytes: number;
+    runs: number;
+    runs_bytes: number;
+    out_bytes: number;
+    // The work folder's name, never its path.
+    work_folder: string | null;
+}
+
+export interface RemoveBody {
+    data: boolean;
+    runs: "delete" | "keep_out" | "keep";
+}

@@ -11,17 +11,22 @@ import {
     apiGetText,
     apiPatch,
     apiPost,
+    apiPostBytes,
     apiPut,
 } from "../api";
 import {
     DevState,
     InputChoice,
+    InstallStatus,
     PickResult,
     PluginAction,
     PluginDetail,
     PluginListItem,
     PluginRun,
+    RemovalInfo,
+    RemoveBody,
     RunRequest,
+    UploadAnswer,
 } from "./pluginTypes";
 
 // Every call the plugins page makes, in one module (ADR-009 D4,
@@ -73,6 +78,18 @@ export interface PluginsApi {
     addDevFolder(pickId: string): Promise<void>;
     removeDevFolder(folderId: string): Promise<void>;
     reload(id: string): Promise<void>;
+    // Install (P5a): the zip's bytes (raw body, not multipart), then an
+    // install of the upload, polled until it needs consent / ends.
+    uploadZip(file: Blob): Promise<UploadAnswer>;
+    dropUpload(uploadId: string): Promise<void>;
+    startInstall(uploadId: string): Promise<InstallStatus>;
+    installStatus(installId: string): Promise<InstallStatus>;
+    consentInstall(installId: string,
+                   consentDigest: string): Promise<InstallStatus>;
+    cancelInstall(installId: string): Promise<InstallStatus>;
+    setEnabled(id: string, enabled: boolean): Promise<void>;
+    removalInfo(id: string): Promise<RemovalInfo>;
+    startRemoval(id: string, body: RemoveBody): Promise<RemovalInfo>;
     // Shell requests: null when the dialog was closed.
     pickFile(extensions: string[]): Promise<PickResult | null>;
     pickFolder(): Promise<PickResult | null>;
@@ -81,6 +98,9 @@ export interface PluginsApi {
 }
 
 const BASE = "/api/v1/plugins";
+
+// A zip is up to limits.zip_max_bytes (2 GiB): give its upload minutes.
+export const UPLOAD_TIMEOUT_MS = 600000;
 
 // :reload runs describe, which the host gives up on after 60 s
 // (contract_1.json describe_timeout_seconds): wait well beyond it.
@@ -143,6 +163,26 @@ export const httpPluginsApi: PluginsApi = {
         await apiPost(`${BASE}/${enc(id)}:reload`, undefined,
                       {timeoutMs: RELOAD_TIMEOUT_MS});
     },
+    uploadZip: async (file) => JSON.parse(await apiPostBytes(
+        `${BASE}/uploads`, file, {timeoutMs: UPLOAD_TIMEOUT_MS})).data,
+    dropUpload: async (uploadId) => {
+        await apiDelete(`${BASE}/uploads/${enc(uploadId)}`);
+    },
+    startInstall: async (uploadId) => JSON.parse(await apiPost(
+        `${BASE}/installs`, {upload_id: uploadId})).data,
+    installStatus: (installId) => data<InstallStatus>(
+        `${BASE}/installs/${enc(installId)}`),
+    consentInstall: async (installId, consentDigest) => JSON.parse(
+        await apiPost(`${BASE}/installs/${enc(installId)}:consent`,
+                      {consent_digest: consentDigest})).data,
+    cancelInstall: async (installId) => JSON.parse(await apiPost(
+        `${BASE}/installs/${enc(installId)}:cancel`)).data,
+    setEnabled: async (id, enabled) => {
+        await apiPost(`${BASE}/${enc(id)}:${enabled ? "enable" : "disable"}`);
+    },
+    removalInfo: (id) => data<RemovalInfo>(`${BASE}/${enc(id)}/removal`),
+    startRemoval: async (id, body) => JSON.parse(await apiPost(
+        `${BASE}/${enc(id)}:remove`, body)).data,
     pickFile: (extensions) => {
         const argument = pickFileArgument(extensions);
         if (argument === null) {

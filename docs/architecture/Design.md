@@ -364,7 +364,7 @@ Help & Settings から開く**メニューのページ**（サイドバーの項
 #### 4.2.3 ページ共通の約束
 
 - 共通部品は `web/src/` の各ページと共有コンポーネント（`NumberInput.tsx`・`CountrySelector.jsx`・`ScoreboardPage/TextField.jsx` ほか）を参照。
-- 書き込みが `SHELL` 区分のページ（アーカイブ・ゲームアセット・トークン・プラグイン。プラグインはブラウザでも読めるのが一覧（`THIS_PC`）だけ＝この PC のブラウザ・ヘッドレスのみで、詳細・設定・実行・開発フォルダは `SHELL`）は `useShellAccess` で共有ビューかを確かめ、ブラウザ・ヘッドレスでは見るだけにして案内を出す。
+- 書き込みが `SHELL` 区分のページ（アーカイブ・ゲームアセット・トークン・プラグイン。プラグインはブラウザでも読めるのが一覧（`THIS_PC`）だけ＝この PC のブラウザ・ヘッドレスのみで、詳細・設定・実行・開発フォルダ・zip の導入・有効無効・削除は `SHELL`。導入は zip の生バイトを `POST /plugins/uploads` → `POST /plugins/installs` → 同意シート（`InstallSection.tsx`）→ `:consent` と進め、削除は `GET .../removal` で確かめて `:remove` を 1 秒ごとに追う（`PluginManage.tsx`）。組み込み・開発中の行には有効無効と削除を出さない）は `useShellAccess` で共有ビューかを確かめ、ブラウザ・ヘッドレスでは見るだけにして案内を出す。
 - 共有ビューの Web UI に外部・第三者の HTML を sandbox なしで入れない（秘密とチケットが同じオリジンの子フレームに届く）。第三者のものは別オリジン（プレビュー用リスナー）か `allow-same-origin` なしの sandbox で出す。
 
 #### 4.2.4 統計情報ページ

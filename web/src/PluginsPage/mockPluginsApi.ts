@@ -1,9 +1,12 @@
 import {PluginsApi} from "./pluginsApi";
 import {
+    ConsentSheet,
     DevState,
+    InstallStatus,
     PluginDetail,
     PluginListItem,
     PluginRun,
+    RemovalInfo,
     RunRequest,
 } from "./pluginTypes";
 
@@ -89,8 +92,28 @@ function listItem(detail: PluginDetail): PluginListItem {
         size_bytes: detail.size_bytes, has_icon: detail.has_icon};
 }
 
+// The sheet of the zip the mock "uploads" (a new plugin).
+export const MOCK_SHEET: ConsentSheet = {
+    id: "acme.hello", version: "1.2.0", name: {ja: "こんにちは", en: "Hello"},
+    author: "acme", license: "MIT", description: null, homepage: false,
+    source: {kind: "manual", name: null}, verified: false,
+    sha256: "0".repeat(64), zip_bytes: 2048, size_bytes: 4096,
+    decision: "new_install", needs_consent: true, installed_version: null,
+    consent_digest: "digest-1",
+    permissions: {network: ["example.com"], files: "inputs", spawn: false,
+                  autona_api: "none"},
+    settings: [], jobs: []};
+
 export function createMockPluginsApi(
-    options: {runningReads?: number} = {}): PluginsApi {
+    options: {runningReads?: number; installReads?: number;
+              sheet?: ConsentSheet} = {}): PluginsApi {
+    const installReads = options.installReads ?? 1;
+    const sheet = options.sheet ?? MOCK_SHEET;
+    let install: {status: InstallStatus; reads: number} | null = null;
+    let removal: RemovalInfo = {
+        state: "idle", error: null, data_bytes: 2048, runs: 3,
+        runs_bytes: 9000, out_bytes: 4000, work_folder: "acme-work"};
+    let removalReads = 0;
     const runningReads = options.runningReads ?? 2;
     const details = new Map<string, PluginDetail>(
         [WEBHOOK, DEV].map((d) => [d.id, clone(d)]));
@@ -201,6 +224,65 @@ export function createMockPluginsApi(
                 (f) => f.id !== folderId)};
         },
         reload: async () => undefined,
+        uploadZip: async () => ({upload_id: "up-1", expires_in_sec: 600}),
+        dropUpload: async () => undefined,
+        startInstall: async () => {
+            install = {reads: 0, status: {
+                install_id: "in-1", state: "preparing", plugin_id: null,
+                sheet: null, error: null}};
+            return install.status;
+        },
+        installStatus: async () => {
+            if (!install) {
+                throw Object.assign(new Error("not found"), {status: 404});
+            }
+            install.reads += 1;
+            if (install.status.state === "preparing"
+                && install.reads > installReads) {
+                install.status = {...install.status, state: "consent",
+                                  plugin_id: sheet.id, sheet};
+            } else if (install.status.state === "installing"
+                       && install.reads > installReads) {
+                details.set(sheet.id, {
+                    ...clone(WEBHOOK), id: sheet.id, name: sheet.name,
+                    version: sheet.version, badge: "manual"});
+                install.status = {...install.status, state: "done"};
+            }
+            return install.status;
+        },
+        consentInstall: async (_id, digest) => {
+            if (!install || digest !== sheet.consent_digest) {
+                throw Object.assign(new Error("bad"), {
+                    status: 400, reason: "invalid_request"});
+            }
+            install.reads = 0;
+            install.status = {...install.status, state: "installing"};
+            return install.status;
+        },
+        cancelInstall: async () => {
+            if (install) {
+                install.status = {...install.status, state: "cancelled"};
+            }
+            return install!.status;
+        },
+        setEnabled: async (id, enabled) => {
+            need(id).state = enabled ? "ready" : "disabled";
+        },
+        removalInfo: async () => {
+            if (removal.state === "removing") {
+                removalReads += 1;
+                if (removalReads > 1) {
+                    throw Object.assign(new Error("gone"), {status: 404});
+                }
+            }
+            return {...removal};
+        },
+        startRemoval: async (id) => {
+            removal = {...removal, state: "removing"};
+            removalReads = 0;
+            details.delete(id);
+            return {...removal};
+        },
         pickFile: async () => ({id: "pick-file-1", name: "picked.png"}),
         pickFolder: async () => ({id: "pick-folder-1", name: "MyFolder"}),
         openLink: async () => undefined,
