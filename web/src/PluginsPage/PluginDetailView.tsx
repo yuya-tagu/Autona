@@ -397,7 +397,10 @@ export default function PluginDetailView({api, id, language, onChanged,
         }, (e) => onError(refusalText(e)));
     };
 
-    if (failed) {
+    // Only a first read that failed replaces the view: a failed reread (the
+    // plugin going away while its removal is followed) keeps what is shown,
+    // so the removal dialog stays mounted and sees the removal through.
+    if (failed && !plugin) {
         return <Alert severity="error">{i18n.t("plugins_detail_failed")}</Alert>;
     }
     if (!plugin) {
