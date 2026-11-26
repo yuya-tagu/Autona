@@ -16,6 +16,7 @@ import dataclasses
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,9 +71,12 @@ def test_the_sdk_is_one_mit_file_of_the_standard_library_outside_the_app():
             assert node.level == 0
             imported.add(node.module.split(".")[0])
     assert imported <= set(sys.stdlib_module_names), imported - set(sys.stdlib_module_names)
-    # Nothing in the app imports it, and the build does not bundle it.
+    # Nothing in the app imports it, and the build does not bundle it
+    # ("autona_plugin" is also a release descriptor's key: only an import
+    # and the file's path count).
+    uses = re.compile(r"^\s*(import|from)\s+autona_plugin\b|sdk[/\\]autona_plugin", re.M)
     for path in [ROOT / "main.py", *(ROOT / "src").rglob("*.py")]:
-        assert "autona_plugin" not in path.read_text(encoding="utf-8"), path
+        assert not uses.search(path.read_text(encoding="utf-8")), path
     spec = (ROOT / "packaging" / "autona.spec").read_text(encoding="utf-8")
     assert "autona_plugin" not in spec and "sdk/" not in spec and "sdk\\" not in spec
     # Python 3.8 (an author's interpreter may be old): the syntax parses.
@@ -1067,12 +1071,26 @@ def test_a_secret_value_is_checked_as_plugin_secrets_checks_it():
     ("LONGFO~1.txt", "bad_name"),
     ("CON", "reserved_name"), ("nul.txt", "reserved_name"), ("dir/com1.log", "reserved_name"),
     ("COM0", "reserved_name"), ("LPT¹", "reserved_name"), ("conin$", "reserved_name"),
-    ("名前.txt", "not_ascii"),
+    ("名前.txt", "not_ascii"), ("del", "not_ascii"), (None, "bad_name"),
+    ("a/./b", "bad_name"), ("LPT9.x", "reserved_name"), ("x~a.txt", None),
+    ("dir\\", None), ("a\\..\\b", "unsafe_path"),
 ])
 def test_a_zip_name_is_judged_as_zip_safety_judges_it(name, code):
+    from src.core import ZipSafety
     assert ap.zip_name_problem(name) == code
+    for ascii_only in (True, False):
+        assert ap.zip_name_problem(name, ascii_only=ascii_only) ==             ZipSafety.NameProblem(name, asciiOnly=ascii_only)[1]
     if code == "not_ascii":
         assert ap.zip_name_problem(name, ascii_only=False) is None
+
+
+def test_the_zip_name_rules_are_zip_safetys():
+    from src.core import ZipSafety
+    assert ap._BAD_CHARS == ZipSafety._BAD_CHARS
+    assert ap._RESERVED_NAMES == ZipSafety._RESERVED
+    assert ap._SHORT_NAME.pattern == ZipSafety._SHORT_NAME.pattern
+    assert {ZipSafety.UNSAFE_PATH, ZipSafety.BAD_NAME, ZipSafety.RESERVED_NAME,
+            ZipSafety.NOT_ASCII} == {"unsafe_path", "bad_name", "reserved_name", "not_ascii"}
 
 
 # ── check <folder>: an installed folder against a dev one ───────────────
