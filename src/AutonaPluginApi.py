@@ -1200,6 +1200,13 @@ def RegisterPluginRoutes(blueprint, deps: PluginApiDeps) -> None:
     if bound is not None:
         bound.deps = deps
         return
+    if getattr(blueprint, "_got_registered_once", False):
+        # Flask refuses a rule added to a blueprint an app already has, and
+        # its own message names no plugin: say what was out of order.
+        raise RuntimeError(
+            f"the plugin routes are added to blueprint {blueprint.name!r} "
+            "after an app registered it: call RegisterPluginRoutes before "
+            "the first register_blueprint")
     bound = _Bound(deps)
     for method, path, name, handler, how in ROUTES:
         if not path.startswith(V1_PREFIX):

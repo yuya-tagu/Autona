@@ -41,6 +41,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 from tests.fixtures import template_packages
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -66,11 +68,14 @@ def _dotted(node):
 
 def _statements(body):
     # The `if X.instance is None:` guards hold most steps; walk into them in
-    # source order.
+    # source order. A step that must not stop the launch is in a `try:`
+    # (its handler only logs): its body is the step.
     for statement in body:
         if isinstance(statement, ast.If):
             yield from _statements(statement.body)
             yield from _statements(statement.orelse)
+        elif isinstance(statement, ast.Try):
+            yield from _statements(statement.body)
         else:
             yield statement
 
@@ -212,9 +217,31 @@ def test_bootstrap_core_steps_and_their_order():
         # push (bootstrap.wire_web_server, the shells'), which follows it.
         "StateManagerBridge.instance.game_loaded.connect("
         "AutonaPlayerDB.SetupModel)",
-        # The archive clipper's jobs (ADR-006 A1): after the settings,
-        # before the shells' web server; nothing read or probed here.
+        # The plugins (ADR-009 E.1): after the settings and the executor,
+        # before ArchiveJobService (its vodsplit becomes the runner's in
+        # I2), the match log (the hooks' dispatcher goes between: I5) and
+        # the shells' web server; in dependency order. Nothing started.
+        # The shell's picks (L10) before the settings that resolve them.
+        "PluginRunner()",
+        "ShellPicks()",
+        "PluginSecrets()",
+        "PluginSettings()",
+        "PluginRegistry()",
+        "PluginInputs()",
+        "PluginJobs()",
+        # Every manifest read at launch (E.2; 10-30 ms), so the list
+        # is whole before the web server serves it; a failure only logs.
+        # The plugin routes are added by the web server when it is made
+        # (WebServer.__init__: flask after the window), not here.
+        "PluginRegistry.instance.Scan()",
+        # The archive clipper's jobs (ADR-006 A1): after the settings and
+        # the plugin runner, before the shells' web server; nothing read or
+        # probed here.
         "ArchiveJobService()",
+        # The plugin runs a crash left running (E.2), after the work folder
+        # it names and the scan; a job: the work folder may be a slow
+        # drive (the probe below pins what it is).
+        "TaskExecutor.instance.submit(...)",
         # The archive worker's installer (ADR-006 A7): after the jobs it
         # holds still for its swap and the executor its check and install
         # run on; what a crashed install left is cleaned before anything can
@@ -266,7 +293,55 @@ def test_bootstrap_gui_steps_and_their_order():
         " = AutonaShellOperations.instance.RenderThumbnail",
         "AutonaWebOperations.startImageRender"
         " = AutonaShellOperations.instance.StartImageRender",
+        # The plugin side of the shell requests (ADR-009 D4, L10): the
+        # picks and the registry, after the shell operations, before the
+        # window. (The artifact reveal, _plugin_reveal_file, is pinned by
+        # the probe below.)
+        "AutonaShellOperations.instance.UsePlugins()",
     ]
+
+
+# ── The shells' close ───────────────────────────────────────────────────
+
+
+def _calls_in_order(path, name):
+    tree = ast.parse((PROJECT_ROOT / path).read_text(encoding="utf-8"))
+    function = next(node for node in ast.walk(tree)
+                    if isinstance(node, ast.FunctionDef) and node.name == name)
+    calls = sorted((node for node in ast.walk(function)
+                    if isinstance(node, ast.Call)),
+                   key=lambda node: (node.lineno, node.col_offset))
+    return [(ast.unparse(node.func), [ast.unparse(arg) for arg in node.args])
+            for node in calls]
+
+
+@pytest.mark.parametrize("path, function, grace", [
+    ("src/Autona.py", "closeEvent",
+     "float(SHUTDOWN_GRACE_SECONDS['desktop'])"),
+    ("src/headless.py", "Shutdown",
+     "float(SHUTDOWN_GRACE_SECONDS['headless'])"),
+])
+def test_both_shells_stop_the_plugin_runs_at_the_archive_s_place(
+        path, function, grace):
+    # ADR-009 E.2: after the web server (no request starts a run any more)
+    # and the archive's worker, before the tasks; the desktop's grace 5 s,
+    # the headless shell's 2 s. The runner after the runs' owners: it ends
+    # what is left at once (a dev plugin's describe) and refuses launches.
+    calls = _calls_in_order(path, function)
+    names = [name for name, _args in calls]
+
+    def at(name):
+        found = [i for i, (call, _args) in enumerate(calls) if call == name]
+        assert len(found) == 1, (name, names)
+        return found[0]
+
+    jobs, runner = (at("PluginJobs.instance.Shutdown"),
+                    at("PluginRunner.instance.Shutdown"))
+    assert at("self.webserver.stop") < at(
+        "ArchiveJobService.instance.Shutdown") < jobs < runner < at(
+        "TaskExecutor.instance.shutdown")
+    assert calls[jobs][1] == [grace]
+    assert calls[runner][1] == ["0.0"]
 
 
 # ── The wiring both shells make ─────────────────────────────────────────
@@ -413,7 +488,8 @@ def _runtime(tmp_path):
     shipped template packages, linked like assets/ (SHIPPED_TEMPLATE_LINKS):
     an install always has them, and the result's and the thumbnail's lists
     are the layout catalog's packages (ADR-007 T1)."""
-    from tests.conftest import _LINKED_TREES, _RUNTIME_DIRS, _link_tree
+    from tests.conftest import (_LINKED_TREES, _RUNTIME_DIRS, _link_tree,
+                                isolated_settings)
 
     links = _LINKED_TREES + SHIPPED_TEMPLATE_LINKS
     for relative in links:
@@ -422,6 +498,11 @@ def _runtime(tmp_path):
         _link_tree(link, PROJECT_ROOT / relative)
     for relative in _RUNTIME_DIRS:
         (tmp_path / relative).mkdir(parents=True, exist_ok=True)
+    # The archive's work folder inside it (the launch's plugin sweep reads
+    # and rewrites it). A launch that writes its own settings.json merges
+    # isolated_settings() into it.
+    (tmp_path / "user_data" / "settings.json").write_text(
+        json.dumps(isolated_settings(tmp_path)), encoding="utf-8")
     try:
         yield tmp_path
     finally:
@@ -581,6 +662,62 @@ provider.provider = FakeProvider()
 loader._OnScanned()
 provider.provider = None
 
+# The plugins (ADR-009 E.1): the parts, and the deps the shells' web server
+# hands the routes when it is made. Neither flask nor the routes are
+# imported by the bootstrap (ADR-003: flask after the window).
+flask_at_bootstrap = "flask" in sys.modules
+api_at_bootstrap = "src.AutonaPluginApi" in sys.modules
+import os
+from src import bootstrap
+from src.core.PluginInputs import PluginInputs
+from src.core.PluginJobs import PluginJobs
+from src.core.PluginRegistry import PluginRegistry
+from src.core.PluginRunner import PluginRunner
+from src.core.PluginSecrets import PluginSecrets
+from src.core.PluginSettings import PluginSettings
+from src.core.ShellPicks import ShellPicks
+from src.core.SettingsManager import SettingsManager
+
+deps = bootstrap.plugin_api_deps()
+picked = ShellPicks.instance.Hold("folder", os.path.abspath("picked"))
+plugins = {
+    "parts": [PluginRunner.instance is not None,
+              ShellPicks.instance is not None,
+              PluginSecrets.instance is not None,
+              PluginSettings.instance is not None,
+              PluginRegistry.instance is not None,
+              PluginInputs.instance is not None,
+              PluginJobs.instance is not None],
+    "flask_at_bootstrap": flask_at_bootstrap,
+    "api_at_bootstrap": api_at_bootstrap,
+    # The work folder is the throwaway one (_runtime's settings.json), so
+    # the sweep read nothing of this PC's.
+    "work_dir": SettingsManager.Get("archive.work_dir")
+        == os.path.abspath("work"),
+    # Scanned at launch: the built-in vodsplit is listed (its folder is not
+    # in this throwaway directory: size 0).
+    "listed": [entry.id for entry in PluginRegistry.instance.Entries()],
+    "deps": [deps.registry is PluginRegistry.instance,
+             deps.settings is PluginSettings.instance,
+             deps.secrets is PluginSecrets.instance,
+             deps.inputs is PluginInputs.instance,
+             deps.jobs is PluginJobs.instance],
+    # Not this stage's: the reveal is the desktop's, the hooks I5's, the
+    # installer I4's.
+    "later": [deps.revealFile, deps.hooks, deps.installer],
+    # One pick resolver, the shell's picks (L10): the settings', the
+    # routes' (a folder field, a run's params, the dev folder to add).
+    "pick": [deps.resolvePick("folder", picked) == os.path.abspath("picked"),
+             deps.resolvePick("file", picked), deps.resolvePick("folder", "x")],
+    "same_pick": PluginSettings.instance._resolvePick == deps.resolvePick
+        == ShellPicks.instance.Resolve,
+    "user_data": [PluginSecrets.instance.userDataDir
+                  == PluginSettings.instance.userDataDir
+                  == PluginJobs.instance._userDataDir
+                  == os.path.abspath("user_data")],
+    "api_url": bootstrap._plugin_api_url(),
+}
+
 report({
     "app_type": type(QCoreApplication.instance()).__name__,
     "core": {
@@ -605,10 +742,12 @@ report({
         "MatchLogService": MatchLogService.instance is not None,
     },
     "registrations": registrations,
+    "plugins": plugins,
     "slot_order": order,
     "stream_title": [title_before_loop, stream_title],
     "state_subscribers": state_subscribers(),
-    # Made, but no lane thread until the first submit.
+    # Made; its first submit is the plugin runs' sweep (one job lane
+    # thread), nothing else.
     "executor_threads": [t.name for t in threading.enumerate()
                          if t.name.startswith(("AutonaJob", "AutonaFanout"))],
     "bad_words_loaded": bool(BadWordFilter.instance.patterns),
@@ -660,7 +799,28 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["app_type"] == "QCoreApplication"
     assert all(result["core"].values()), result["core"]
     assert not any(result["gui"].values()), result["gui"]
-    assert result["executor_threads"] == []
+    # The plugin runs' sweep (ADR-009 E.2) is the executor's one job at
+    # launch: a lane thread for it, no fan-out.
+    assert len(result["executor_threads"]) == 1, result["executor_threads"]
+    assert result["executor_threads"][0].startswith("AutonaJob")
+    # The plugins (ADR-009 E.1): every part, every plugin route on the v1
+    # blueprint added by the shells' web server (not the bootstrap: flask
+    # stays after the window), the registry scanned, the routes' deps the
+    # parts themselves -- the reveal, the hooks and the installer left to
+    # the desktop / I5 / I4 -- and one pick resolver, the shell's picks.
+    plugins = result["plugins"]
+    assert all(plugins["parts"]), plugins
+    assert plugins["flask_at_bootstrap"] is False
+    assert plugins["api_at_bootstrap"] is False
+    assert plugins["work_dir"] is True
+    assert plugins["listed"] == ["taguyan.vodsplit"]
+    assert all(plugins["deps"]), plugins
+    assert plugins["later"] == [None, None, None]
+    assert plugins["pick"] == [True, None, None]
+    assert plugins["same_pick"] is True
+    assert plugins["user_data"] == [True]
+    assert plugins["api_url"].startswith("http://127.0.0.1:")
+    assert plugins["api_url"].endswith("/api/v1")
     # The game loader is this stage's, registered for both shells (ADR-005
     # S-final SF-6c: the provider had no selector, and the web operations
     # no loader, until a shell registered its adapter's), and the provider's
@@ -760,6 +920,17 @@ report({
     # one it showed (AutonaActions.EnsureBoard, ADR-005 S4y).
     "boards_ensured": [AutonaActions.instance.BoardEnsured(n)
                        for n in (1, 2, 3)],
+    # The plugin routes' artifact reveal is the desktop's (ADR-009 D4), and
+    # so is the plugin side of the shell requests (L10).
+    "plugin_reveal": __import__("src.bootstrap", fromlist=["x"])
+        .plugin_api_deps().revealFile.__name__,
+    "plugin_shell": [
+        AutonaShellOperations.instance._picks
+        is __import__("src.core.ShellPicks", fromlist=["x"])
+        .ShellPicks.instance,
+        AutonaShellOperations.instance._registry
+        is __import__("src.core.PluginRegistry", fromlist=["x"])
+        .PluginRegistry.instance],
     "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -794,6 +965,8 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["mods_off"] is True
     assert result["shell_operations"] == [True, True, True]
     assert result["boards_ensured"] == [True, True, True]
+    assert result["plugin_reveal"] == "_reveal_plugin_file"
+    assert result["plugin_shell"] == [True, True]
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False

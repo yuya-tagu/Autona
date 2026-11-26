@@ -15,7 +15,9 @@ Where plugins come from (``Scan``):
 - the dev folders (D4): ``user_data/plugins/dev.json``'s list while its
   toggle is on, and ``AUTONA_PLUGIN_DEV`` (``;``-separated, always).
   ``DevFolders`` names dev.json's while the toggle is off too
-  (``DevFolderActive``). A broken dev.json is moved aside before the next
+  (``DevFolderActive``), unread: no plugin id (a folder on a sleeping or
+  unplugged drive does not hold a scan the developer did not ask for). A
+  broken dev.json is moved aside before the next
   write, never overwritten. A dev
   folder is named by ``DevFolderId`` (the first 12 hex digits of the
   SHA-256 of its normalised absolute path), never by its position.
@@ -320,10 +322,14 @@ class PluginRegistry:
     - ``settingsMissing(pluginId, manifest, *, dev) -> Sequence[str]``:
       PluginSettings.Missing. Default: none;
     - ``builtinVersion() -> Optional[str]``: the vodsplit worker's version
-      the archive page last probed. Default: unknown ("");
+      the archive page last probed, asked each time the built-in is read
+      (Get / Entries), not only at a scan. Default: unknown ("");
     - ``environ() -> Mapping[str, str]``: default ``os.environ``;
     - ``which(name) -> Optional[str]``: a dev entry's PATH lookup.
     """
+
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
 
     def __init__(self, appDir: str, userDataDir: str, hostVersion: str, *,
                  describe: Optional[Callable[..., DescribeRun]] = None,
@@ -1130,15 +1136,9 @@ class PluginRegistry:
         for path, fromEnv, isActive in self._DevPaths():
             folderId = DevFolderId(path)
             if not isActive:
-                # Listed while the toggle is off: named, not checked.
-                try:
-                    raw, _problem = ReadManifest(path)
-                except Exception:
-                    raw = None
-                pluginId = raw.get("id") if isinstance(raw, dict) else None
-                folders.append(DevFolder(folderId, path, pluginId
-                                         if isinstance(pluginId, str) else None,
-                                         fromEnv))
+                # Listed while the toggle is off: named by its path, not
+                # read (no plugin id until the toggle is on).
+                folders.append(DevFolder(folderId, path, None, fromEnv))
                 continue
             active.add(folderId)
             report = self._CheckFolder(path, InstallSource("dev"), dev=True)
@@ -1166,10 +1166,18 @@ class PluginRegistry:
             return default
 
     def _Live(self, plugin: RegisteredPlugin) -> RegisteredPlugin:
-        """``plugin`` with its state, enabled and blocked reason now."""
+        """``plugin`` with its state, enabled and blocked reason now (and,
+        for the built-in, the worker's version now: the archive page
+        probes it after the launch's scan)."""
+        builtin, dev = plugin.badge == Badge.BUILTIN, plugin.badge == Badge.DEV
+        if builtin and plugin.report.manifest is not None:
+            version = self._Call(self._builtinVersion, "") or ""
+            if version != plugin.report.manifest.version:
+                plugin = dataclasses.replace(plugin, report=dataclasses.replace(
+                    plugin.report, manifest=dataclasses.replace(
+                        plugin.report.manifest, version=version)))
         report, manifest = plugin.report, plugin.report.manifest
         applies = set()
-        builtin, dev = plugin.badge == Badge.BUILTIN, plugin.badge == Badge.DEV
         blocked = None
         if not builtin and not dev:
             blocked = self._Call(self._blockedBy, None, plugin.id,

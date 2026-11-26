@@ -145,6 +145,9 @@ def _Write(path: str, data: bytes) -> None:
 
 class PluginInputs:
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, *, outDir: str, matchLogDir: str,
                  workDir: Callable[[], str],
                  publishedState: Callable[[], Mapping[str, Any]],

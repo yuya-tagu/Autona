@@ -193,6 +193,9 @@ class PluginSettings:
     ``secrets``: PluginSecrets (its ``Keys`` for Missing). ``resolvePick``:
     the host's pick ids -> absolute paths (pickFile / pickFolder)."""
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, userDataDir: str, secrets,
                  resolvePick: Optional[PickResolver] = None):
         self.userDataDir = os.path.abspath(userDataDir)

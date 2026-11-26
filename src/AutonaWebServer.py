@@ -1264,6 +1264,26 @@ class WebServer:
         # hand it: it calls the operations the shell registered on, and no
         # request can reach it before start() (ADR-005 S3e-9).
         from .AutonaApiV1 import api_v1
+
+        # The plugin routes (ADR-009 D4; AutonaPluginApi) onto the v1
+        # blueprint. ORDER CONSTRAINT: before the blueprint's first
+        # register_blueprint (a rule added later never reaches an app, and
+        # RegisterPluginRoutes refuses it), and here rather than in
+        # bootstrap_core() so flask is still imported after the window is
+        # shown (ADR-003). The parts are what the bootstrap made
+        # (bootstrap.plugin_api_deps); a second server made in one process
+        # only hands its routes the new parts. Their access classes are
+        # WebAccess.ROUTE_ACCESS's (the list and the icon THIS_PC, the rest
+        # SHELL); none is in the API catalogue. A failure here is logged and
+        # the server goes on without them (the plugins page then answers
+        # 404): the scoreboard does not depend on the plugins.
+        try:
+            from . import bootstrap
+            from .AutonaPluginApi import RegisterPluginRoutes
+            RegisterPluginRoutes(api_v1, bootstrap.plugin_api_deps())
+        except Exception:
+            logger.opt(exception=True).error(
+                "Plugins: the plugin routes could not be added")
         if "api_v1" not in WebServer.app.blueprints:
             WebServer.app.register_blueprint(api_v1)
 

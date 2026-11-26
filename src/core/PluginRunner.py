@@ -740,6 +740,9 @@ class PluginRunner:
     """``PluginTypes.PluginRunner``. One per process (bootstrap_core makes
     it; nothing at construction)."""
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, *, clock: Callable[[], float] = time.monotonic,
                  poll: float = POLL_SECONDS,
                  cancelGrace: float = T.CANCEL_GRACE_SECONDS,

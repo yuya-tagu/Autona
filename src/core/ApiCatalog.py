@@ -25,7 +25,10 @@ the shell request's ticket (``/shell-session``; SHELL, SF-5a-1), nor the
 archive clipper's (``/archive/*``; the reads THIS_PC, the writes SHELL,
 ADR-006 A1: its page alone calls them), nor the layout kit's
 (``/layouts:create``, ``/layouts/kit/<kind>/ai-prompt``,
-``/layouts:reveal``; SHELL, ADR-008 L2: the design lists alone call them).
+``/layouts:reveal``; SHELL, ADR-008 L2: the design lists alone call them),
+nor the plugins' (``/plugins*``; the list and the icon THIS_PC, the rest
+SHELL, ADR-009 D4: the plugins page alone calls them, and one route serves
+every plugin).
 
 Core module: pure data and a copy of it -- no Qt (tests/test_core_qt_free
 .py), nothing read or built at import time.

@@ -22,7 +22,8 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from src.core.PluginJobs import CheckArtifact, PluginJobs
+from src.core.PluginJobs import (HOST_KEY, CheckArtifact, HostAlive,
+                                  PluginJobs, RecordJson, ThisHost)
 from src.core.PluginTypes import (
     RUN_ID_PATTERN, Action, ActionTarget, Artifact, ArtifactKind,
     ArtifactRejection, Badge, DoneEvent, EndReason, ErrorEvent, Field,
@@ -309,7 +310,11 @@ def test_request_json_holds_the_contract_fields(env):
     assert request["host"] == {"name": "Autona", "version": "2.6.0"}
 
     job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
-    assert set(job) == set(CONTRACT["job_record"]["fields"])
+    # The contract's keys, and the host's private one (the Sweep's: which
+    # process wrote it), which no RunRecord reads and no route serves.
+    assert set(job) == set(CONTRACT["job_record"]["fields"]) | {HOST_KEY}
+    assert job[HOST_KEY] == ThisHost()
+    assert HOST_KEY not in RecordJson(env.jobs.Get(PLUGIN, record.run_id))
     assert job["state"] == "running" and job["lane"] == "light"
     assert job["trigger"] == {"kind": "manual"}
     assert job["timeout_seconds"] == 60
@@ -827,18 +832,86 @@ def test_log_tail(env):
 
 # ── Sweep and Shutdown ──────────────────────────────────────────────────
 
-def test_sweep_fails_the_runs_left_running(env):
-    left = env.StartPost()
-    folder = env.RunFolder(left)
-    # A new process: the run on disk is not one of its own.
-    env.jobs = PluginJobs(
+def _NewProcess(env, hostAlive=lambda host: False, **kwargs):
+    """PluginJobs as the next launch makes it: none of the runs on disk is
+    its own, and (by default) the host that wrote them is gone."""
+    return PluginJobs(
         runner=env.runner, registry=env.registry, inputs=env.inputs,
         settings=env.settings, secrets=FakeSecrets(),
         workDir=lambda: str(env.work), userDataDir=str(env.userData),
         hostVersion="2.6.0", locale=lambda: "en", apiUrl=lambda: None,
         onRunEnded=env.ended.append, onLaneFreed=env.freed.append,
-        clock=env.clock)
+        clock=env.clock, hostAlive=hostAlive, **kwargs)
+
+
+def test_sweep_leaves_a_run_of_another_autona_still_running(env):
+    # Two Autonas on one work folder (a test run beside the real app):
+    # the other's run is alive under it, so it is not marked failed.
+    left = env.StartPost()
+    env.clock.Advance(1)
+    asked = []
+    env.jobs = _NewProcess(
+        env, hostAlive=lambda host: asked.append(host) or True,
+        host={"pid": 1, "started": 2})
     env.clock.Advance(60)
+    env.jobs.Sweep()
+    assert asked == [ThisHost()]
+    assert env.jobs.Get(PLUGIN, left.run_id).state is JobState.RUNNING
+    assert (env.RunFolder(left) / "inputs").exists()
+
+
+def test_sweep_asks_the_real_process_by_default(env):
+    # The host is this test's process (alive): left alone. One whose
+    # creation time differs is a reused pid: swept.
+    left = env.StartPost()
+    env.clock.Advance(1)
+    env.jobs = _NewProcess(env, hostAlive=HostAlive)
+    env.jobs.Sweep()
+    assert env.jobs.Get(PLUGIN, left.run_id).state is JobState.RUNNING
+    path = env.RunFolder(left) / "job.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw[HOST_KEY]["started"] = (raw[HOST_KEY]["started"] or 0) + 1
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    if raw[HOST_KEY]["started"] is not None and os.name == "nt":
+        env.jobs.Sweep()
+        assert env.jobs.Get(PLUGIN, left.run_id).state is JobState.FAILED
+    assert HostAlive("not a host") is False
+    assert HostAlive({"pid": True, "started": None}) is False
+
+
+def test_sweep_leaves_a_run_started_since_it_was_made(env):
+    # The sweep is a job: a run may start before it runs, and its job.json
+    # then says running without being in the active set when the sweep
+    # took it.
+    env.jobs = _NewProcess(env)
+    record = env.StartPost()
+    folder = env.RunFolder(record)
+    # As the sweep sees it when the start came after it took the active
+    # runs: an empty set.
+    env.jobs._SweepPlugin(PLUGIN, frozenset(), "2026-11-26T22:00:00+09:00")
+    job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+    assert job["state"] == "running"
+
+
+def test_sweep_stops_between_plugins_when_asked(env):
+    env.StartPost()
+    env.clock.Advance(1)
+    env.jobs = _NewProcess(env)
+    swept = []
+    env.jobs._SweepPlugin = lambda *args: swept.append(args)
+    env.jobs.Sweep(stopping=lambda: True)
+    assert swept == []
+    env.jobs.Sweep(stopping=lambda: False)
+    assert [args[0] for args in swept] == [PLUGIN]
+
+def test_sweep_fails_the_runs_left_running(env):
+    left = env.StartPost()
+    folder = env.RunFolder(left)
+    env.clock.Advance(1)
+    # A new process: the run on disk is not one of its own, and the host
+    # that wrote it is gone.
+    env.jobs = _NewProcess(env)
+    env.clock.Advance(59)
     current = env.StartPost()
     env.jobs.Sweep()
     swept = env.jobs.Get(PLUGIN, left.run_id)
@@ -1012,14 +1085,9 @@ def test_a_hook_run_left_running_is_swept_and_kept_once(env):
     env.clock.Advance(1)
     env.End(0, FAILED)
     second = _StartHook(env)
+    env.clock.Advance(1)
     # A new process finds the second still running.
-    env.jobs = PluginJobs(
-        runner=env.runner, registry=env.registry, inputs=env.inputs,
-        settings=env.settings, secrets=FakeSecrets(),
-        workDir=lambda: str(env.work), userDataDir=str(env.userData),
-        hostVersion="2.6.0", locale=lambda: "en", apiUrl=lambda: None,
-        onRunEnded=env.ended.append, onLaneFreed=env.freed.append,
-        clock=env.clock)
+    env.jobs = _NewProcess(env)
     env.jobs.Sweep()
     assert not env.RunFolder(first).exists()
     swept = env.jobs.Get(PLUGIN, second.run_id)

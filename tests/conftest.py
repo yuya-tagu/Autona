@@ -526,6 +526,43 @@ HARNESS_GAME = "harness_game"
 HARNESS_GAME_NAME = "Harness Game"
 
 
+def isolated_settings(directory) -> dict:
+    """The settings.json keys an isolated launch in ``directory`` needs so
+    it reads and writes nothing outside it: the archive's work folder
+    (archive.work_dir; unset, it is the operator's Videos/Autona, which the
+    launch's plugin sweep reads and rewrites -- ADR-009 E.2). The harness,
+    tests/test_bootstrap_split.py's _runtime() and the launches that write
+    their own settings.json (the headless smoke test, the browser E2E's
+    server) merge it into theirs."""
+    return {"archive": {"work_dir": str(Path(directory).resolve() / "work")}}
+
+
+# The plugin v1 routes (ADR-009 D4) are added to the module-wide v1
+# blueprint once, here, before any test can register that blueprint on an
+# app of its own: Flask refuses a rule added to a blueprint an app already
+# has, and the app adds them only when its web server is made
+# (WebServer.__init__), which not every test that registers the blueprint
+# does. Their parts are empty (each route answers 503) until the harness
+# hands them the bootstrapped ones (_autonaRuntime) or a web server is made.
+# Only when the blueprint has none: a second import of this module (as
+# another name) must not hand the routes empty parts again. Skipped where
+# Flask is not installed (CI's web job runs the runtime contract test with
+# pytest alone): no test there can register the blueprint either.
+def _addPluginRoutes():
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        return
+    from src import AutonaPluginApi
+    from src.AutonaApiV1 import api_v1
+    if getattr(api_v1, AutonaPluginApi._BOUND_ATTRIBUTE, None) is None:
+        AutonaPluginApi.RegisterPluginRoutes(
+            api_v1, AutonaPluginApi.PluginApiDeps())
+
+
+_addPluginRoutes()
+
+
 def _link_tree(link: Path, target: Path):
     """Point `link` at `target` without copying or needing admin rights.
 
@@ -870,6 +907,10 @@ def _autonaRuntime(qapp, tmp_path_factory):
         _link_tree(link, PROJECT_ROOT / relative)
     for relative in _RUNTIME_DIRS:
         (directory / relative).mkdir(parents=True, exist_ok=True)
+    # The archive's work folder inside the runtime directory, not the
+    # developer's: the bootstrap's plugin sweep reads and rewrites it.
+    (directory / "user_data" / "settings.json").write_text(
+        json.dumps(isolated_settings(directory)), encoding="utf-8")
 
     previousDir = AutonaDirHelper.current_dir
     os.chdir(directory)
@@ -889,6 +930,12 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # tests drive.
         bootstrap_core()
         bootstrap_gui()
+        # The plugin routes read the bootstrapped parts from now on, as the
+        # app's web server hands them (WebServer.__init__).
+        from src import bootstrap
+        from src.AutonaApiV1 import api_v1
+        from src.AutonaPluginApi import RegisterPluginRoutes
+        RegisterPluginRoutes(api_v1, bootstrap.plugin_api_deps())
         harness = _AutonaHarness(directory)
         # The boards bootstrap_gui() made (AutonaActions.MakeBoards, ADR-005
         # S4ac-1: all three, boards 1 / 2 held), as it left them, for

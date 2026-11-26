@@ -574,6 +574,33 @@ def test_the_scan_finds_the_builtin_and_the_installed(tmp_path):
     assert ("id_folder_mismatch", "plugin", None) in _found(misnamed.report)
 
 
+def test_the_builtins_version_is_asked_each_time_it_is_read(tmp_path):
+    # The launch's scan comes before the archive page's first probe: the
+    # version is read again on each Get / Entries, not kept from the scan.
+    probed = {"version": ""}
+    registry = _registry(tmp_path, builtinVersion=lambda: probed["version"])
+    registry.Scan()
+    assert registry.Get(BUILTIN_ID).report.manifest.version == ""
+    probed["version"] = "0.6.1"
+    assert registry.Get(BUILTIN_ID).report.manifest.version == "0.6.1"
+    assert registry.Entries()[0].version == "0.6.1"
+
+
+def test_a_toggled_off_dev_folder_is_not_read(tmp_path, monkeypatch):
+    from src.core import PluginRegistry as module
+    folder = _dev(tmp_path, "src", "me.tool")
+    registry = _registry(tmp_path)
+    registry.AddDevFolder(str(folder))
+    read = []
+    real = module.ReadManifest
+    monkeypatch.setattr(module, "ReadManifest",
+                        lambda path: read.append(path) or real(path))
+    registry.Scan()
+    assert read == []
+    registry.SetDevMode(True)
+    assert read != []
+
+
 def test_the_builtin_points_at_the_archive_workers_folder(tmp_path):
     registry = _registry(tmp_path)
     registry.Scan()
@@ -961,8 +988,10 @@ def test_a_listed_dev_folder_shows_while_the_toggle_is_off(tmp_path):
     folder = _dev(tmp_path, "src", "me.tool")
     registry = _registry(tmp_path)
     added = registry.AddDevFolder(str(folder))
+    # Named by its path, not read while the toggle is off (a folder on an
+    # unplugged drive does not hold the scan): no plugin id yet.
     assert [(f.id, f.plugin_id, f.from_env) for f in registry.DevFolders()] == [
-        (added.id, "me.tool", False)]
+        (added.id, None, False)]
     assert registry.DevFolderActive(added.id) is False
     assert "me.tool" not in [e.id for e in registry.Entries()]
     registry.SetDevMode(True)
