@@ -51,7 +51,11 @@ class ThumbnailRenderer(AutonaOffscreenRenderer):
 
         Only use for user-initiated final generation (no re-entrancy risk).
         Page is already loaded so this blocks for well under a second, plus
-        what a render in progress has left: it ends first.
+        what a render in progress has left: it ends first. At worst (a page
+        that never answers) it fails after four STAGE_TIMEOUT_MS -- the load
+        on its way waited for, its own load, its script, its picture -- and
+        TIMEOUT_READ_MS (40 s and 1 s as shipped), after the renders queued
+        before it.
 
         An empty picture when it failed; why is then ``syncError`` (the
         render's error: PREVIEW_UNAVAILABLE when there is no preview

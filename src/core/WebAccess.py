@@ -68,7 +68,7 @@ import re
 import secrets
 import threading
 from typing import NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 from loguru import logger
 
@@ -1087,6 +1087,7 @@ def OwnOrigins(port, extraHosts=()):
 # ── The decision ────────────────────────────────────────────────────────
 UNAUTHENTICATED = "UNAUTHENTICATED"   # 401
 FORBIDDEN = "FORBIDDEN"               # 403
+INTERNAL = "INTERNAL"                 # 500 (src/AutonaApiV1.py's)
 
 # How a request was let in (Authorize's first value).
 GRANT_TOKEN = "token"       # it carried the token
@@ -1118,6 +1119,12 @@ THIS_PC_ONLY = Refusal(
 SHELL_ONLY = Refusal(
     403, FORBIDDEN, "only the Autona app's own window may ask this",
     "shell_only")
+
+# A redirect the server would have sent to a request that carried the
+# shell's secret, to anywhere but this origin's /api/v1/ (ShellRedirect
+# Refusal): sent as this instead. The server's own fault, so 500 INTERNAL.
+SHELL_REDIRECT = Refusal(
+    500, INTERNAL, "internal error", "shell_redirect")
 
 # Whatever the preview listener does not serve (PreviewServes), and every
 # write of a Socket.IO connection made there -- token or not: the port is a
@@ -1220,6 +1227,70 @@ def ShellRefusalReason(grant, refusal, fetchSite, secret):
         return "fetch_site"
     if not ShellSecretMatches(secret):
         return "no_secret" if not secret else "secret"
+    return None
+
+
+# A Location the server may send to a request that carried SHELL_HEADER:
+# printable ASCII without a backslash (Chromium reads one as a slash, and
+# drops tabs and newlines, where urljoin does not).
+_SHELL_REDIRECT_LOCATION = re.compile(r"[!-\[\]-~]*")
+# One that names a host ("//host", "scheme://host"). With none after the
+# slashes ("///api/v1/x", "http:///api/v1/x") urljoin keeps the request's
+# host where Chromium reads the next segment as the host.
+_SHELL_REDIRECT_AUTHORITY = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]*:)?//")
+_SHELL_REDIRECT_PATH = "/api/v1/"
+
+
+def ShellRedirectRefusal(status, locations, requestUrl):
+    """None when a response may go to a request that carried SHELL_HEADER
+    (whatever its value), else why not (short, for the log; the server sends
+    SHELL_REDIRECT instead).
+
+    A redirect carries the header to its next hop, and QtWebEngine sends
+    that hop before the shared view's interceptor sees it (measured on
+    PySide6 6.11): the interceptor's block keeps the answer from the page,
+    not the request -- and the secret -- from the next hop's server. So the
+    server never sends one but to this origin's /api/v1/, where the
+    interceptor would add the secret again.
+
+    ``status`` is the response's status, ``locations`` its ``Location``
+    headers, all of them (none: not a redirect), ``requestUrl`` the URL the
+    request was sent to (Flask's ``request.url``: the Host it was addressed
+    by). The target is the Location resolved against it; refused when there
+    is more than one Location or it cannot be read the way Chromium would
+    ("location"), when it is not of the request's origin ("elsewhere"), or
+    when its path, decoded, is not under /api/v1/ or has a dot segment
+    ("outside_api"). Origins are compared as NormalizeOrigin spells them:
+    another spelling of the same IPv6 address is "elsewhere" (the safe
+    side). Every 3xx with a Location is judged, 304 / 305 / 306 too, which
+    Chromium does not follow: conservative on purpose.
+    """
+    if not 300 <= status < 400 or not locations:
+        return None
+    if len(locations) > 1:
+        return "location"
+    location = locations[0]
+    if (not isinstance(location, str)
+            or not _SHELL_REDIRECT_LOCATION.fullmatch(location)):
+        return "location"
+    try:
+        if (_SHELL_REDIRECT_AUTHORITY.match(location)
+                and not urlsplit(location).netloc):
+            return "location"
+        target = urlsplit(urljoin(requestUrl, location))
+        own = urlsplit(requestUrl)
+        origin = NormalizeOrigin(f"{own.scheme}://{own.netloc}")
+        if origin is None or NormalizeOrigin(
+                f"{target.scheme}://{target.netloc}") != origin:
+            return "elsewhere"
+    except ValueError:
+        return "location"
+    path = unquote(target.path)
+    # A literal dot segment urljoin has resolved already; this catches an
+    # encoded one (%2e%2e, .%2E), which Chromium resolves too.
+    if (not path.startswith(_SHELL_REDIRECT_PATH) or "\\" in path
+            or any(part in (".", "..") for part in path.split("/"))):
+        return "outside_api"
     return None
 
 

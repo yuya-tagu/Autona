@@ -155,7 +155,7 @@ paths:
 | `AnalysisService` / `SetSelectionService` | `.instance` | 試合一覧 / セット選択の一覧 |
 | `MatchNameCandidates` | `.instance` | match バーの候補（state に入れない） |
 | `StreamService` | `.instance` | 配信設定のすべて |
-| `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2） |
+| `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2）。match_decided の候補と取り消しを配り役へ（ADR-009 付録 D.1） |
 | `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト（テンプレート・レイアウトの一覧は `LayoutCatalog` のテンプレートパッケージ。コードに表を持たない。ADR-007 T1） |
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
@@ -372,6 +372,9 @@ paths:
   既定プロファイルの永続化ポリシーは `AskEveryTime`（Designer が同じプロファイルなので、grant が黙って効いた）
 - **シェルの秘密を付けるのはページ自身のインターセプタ**（プロファイルに付けない: Designer にも付く）。条件は `ShellHeaderWanted`、合わない要求が
   秘密を持っていたら `block(True)`。インターセプタは UI スレッドで走るので待たない
+  - `block(True)` はページへの応答を止めるだけ（QtWebEngine はリダイレクトの次の宛先を、ヘッダごと、インターセプタより先に送る）。
+    リダイレクトで秘密が外へ出ない保証はサーバーの `after_request`（`shell_redirect` → `WebAccess.ShellRedirectRefusal`: 秘密のヘッダ付きの要求への
+    3xx は同じオリジンの `/api/v1/` 宛てだけ。pin: `tests/test_web_access.py`）
 - **共有ビューの Web UI では、外部・第三者の HTML を sandbox なしの srcdoc / about:blank / innerHTML（`dangerouslySetInnerHTML`）に入れない**:
   同じオリジンの子フレームの fetch にも秘密が付き、チケットも読めるので、そのスクリプトが SHELL のルートとシェル要求を使える。第三者のものは
   別オリジン（プレビュー用のリスナー）か sandbox（`allow-same-origin` なし）のフレームに出し、チケットを渡さない（実 QtWebEngine で pin）

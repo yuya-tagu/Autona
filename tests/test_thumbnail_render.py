@@ -647,6 +647,38 @@ def test_the_wait_for_the_frame_is_one_for_both(renderer):
     assert renderer._frame_wait_ms() == 6000
 
 
+def test_the_picture_has_a_stage_of_its_own(renderer):
+    """The wait for the frame is FRAME_WAIT_MS however long the script took:
+    it was what the script's stage left, and a first page whose script took
+    6 s of 10 on a loaded CI runner had 2.5 s left to see its mark, which
+    reached the view later (tests/test_render_platform.py)."""
+    renderer.FRAME_WAIT_MS = 2000
+    renderer.FRAME_RESERVE_MS = 1500
+    _markShowing(renderer, GREEN)
+    finalize = renderer._finalize_render
+    waits = []
+
+    def first_look(ticket):
+        if not waits:
+            waits.append(renderer._frame_wait_ms())
+        finalize(ticket)
+
+    renderer._finalize_render = first_look
+    results = []
+    # The page says nothing: the test says it is done, once its script has
+    # used all but 3 s of its stage (what is left, less the reserve: less
+    # than the wait, however slow this machine is).
+    renderer.renderAsync({}, {"hang": True}, _template(),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: renderer._active.started)
+    renderer._watchdog.start(3000)
+    renderer._page.runJavaScript('document.title = "RENDER_READY"')
+
+    assert _waitUntil(lambda: results)
+    assert results[0][1] == ""
+    assert waits == [2000]
+
+
 def test_a_render_that_timed_out_while_waiting_for_its_frame_is_not_taken(
         renderer):
     renderer.FRAME_WAIT_MS = LONG_TIMEOUT_MS
@@ -1271,10 +1303,11 @@ class _Ended:
         return url
 
 
-def test_a_late_end_of_a_replaced_load_is_not_taken_for_the_new_one(renderer):
-    """Its document is on its way out. Taken for the new one, the render would
-    run its script there, and the new page would then start with no script."""
-    replaced = renderer._load_query or f"load={renderer._load_number}"
+def test_a_late_end_of_an_older_load_is_not_taken_for_the_new_one(renderer):
+    """An older load's (one stopped and forgotten, _abandon_load) document is
+    on its way out. Taken for the new one, the render would run its script
+    there, and the new page would then start with no script."""
+    older = renderer._load_query or f"load={renderer._load_number}"
     results = []
     loads = []
     load = renderer._view.load
@@ -1282,19 +1315,204 @@ def test_a_late_end_of_a_replaced_load_is_not_taken_for_the_new_one(renderer):
 
     renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
                          lambda p, e: results.append((p, e)))
-    assert renderer._load_query != replaced
-    renderer._on_loading_changed(_Ended(replaced))
+    assert renderer._load_query != older
+    renderer._on_loading_changed(_Ended(older))
 
     assert renderer._page_loaded is False
     assert renderer._active.started is False
     # Nor does a failure end what it is not about.
     renderer._on_loading_changed(_Ended(
-        replaced, QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus))
+        older, QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus))
     assert renderer._load_query is not None
 
     load(loads[0])
     assert _waitUntil(lambda: results)
     assert _color(results[0][0]) == GREEN
+
+
+def test_a_load_on_its_way_is_not_cut_off(renderer):
+    """A render that wants another page waits for the load on its way to
+    end, and then loads its own. Cut off while it was taking its response,
+    QtWebEngine said the end of the load before (its URL, failed or even
+    succeeded) and nothing of the new one, whose render then never started
+    (tests/test_result_render.py's page that never loads, on CI)."""
+    results = []
+    loads = []
+    load = renderer._view.load
+    renderer._view.load = loads.append
+    renderer.STAGE_TIMEOUT_MS = 100
+
+    # Its load goes on after it timed out (another template's page).
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    assert results == [(None, "the render timed out")]
+
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_a"),
+                         lambda p, e: results.append((p, e)))
+    assert len(loads) == 1
+    assert renderer._active.awaitsLoad
+
+    load(loads[0])
+    assert _waitUntil(lambda: len(loads) == 2)
+    assert loads[1].path() == "/layout/thumbnail/thumbnail.html"
+    load(loads[1])
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1][1] == ""
+    assert _color(results[1][0]) == GREEN
+    assert renderer._template_id == "type_a"
+
+
+def test_a_load_a_render_waited_out_is_stopped_for_the_next_one(renderer):
+    """Its end may never be heard (above): a render that waited a whole stage
+    for a load it did not begin stops it and forgets it, and the next render
+    loads its own -- not waiting for it, and timing out, from then on."""
+    results = []
+    loads = []
+    load = renderer._view.load
+    renderer._view.load = loads.append
+    renderer.STAGE_TIMEOUT_MS = 100
+
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    # Waits for the first one's load, which is never heard of again.
+    renderer.renderAsync({}, {"color": RED}, _template("type_a"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1] == (None, "the render timed out")
+    assert len(loads) == 1
+    assert renderer._load_query is None
+
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_a"),
+                         lambda p, e: results.append((p, e)))
+    assert len(loads) == 2
+    load(loads[1])
+    assert _waitUntil(lambda: len(results) == 3)
+    assert results[2][1] == ""
+    assert _color(results[2][0]) == GREEN
+
+
+def _waitingBehindALoad(renderer, template="type_a"):
+    """A render of `template` (another page than type_b) waiting for type_b's
+    load, begun for a render that timed out and still on its way: the
+    results, the loads the view was asked for, and the real load."""
+    results = []
+    loads = []
+    load = renderer._view.load
+    renderer._view.load = loads.append
+    renderer.STAGE_TIMEOUT_MS = 100
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    assert results == [(None, "the render timed out")]
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template(template),
+                         lambda p, e: results.append((p, e)))
+    return results, loads, load
+
+
+def test_a_load_waited_for_that_fails_is_followed_by_its_own(renderer):
+    """Whatever the end of the load it waited for, the render loads its own
+    page then: a failure is not its own page's."""
+    results, loads, load = _waitingBehindALoad(renderer)
+    assert renderer._active.awaitsLoad and len(loads) == 1
+
+    renderer._on_loading_changed(_Ended(
+        renderer._load_query,
+        QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus))
+    assert _waitUntil(lambda: len(loads) == 2)
+    assert loads[1].path() == "/layout/thumbnail/thumbnail.html"
+    load(loads[1])
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1][1] == ""
+    assert _color(results[1][0]) == GREEN
+
+
+def test_an_edited_page_on_its_way_is_waited_for_as_well(renderer, autonaApp):
+    """The same template, but its files changed since its load began
+    (_stale): its page is loaded again once that load has ended, not over
+    it."""
+    page = autonaApp.dir / "layout" / "thumbnail_type_b" / "thumbnail.html"
+    results, loads, load = [], [], renderer._view.load
+    renderer._view.load = loads.append
+    renderer.STAGE_TIMEOUT_MS = 100
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    stamp = page.stat().st_mtime_ns + 5_000_000_000
+    os.utime(page, ns=(stamp, stamp))
+
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert renderer._active.awaitsLoad and len(loads) == 1
+
+    load(loads[0])
+    assert _waitUntil(lambda: len(loads) == 2)
+    load(loads[1])
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1][1] == ""
+    assert _color(results[1][0]) == GREEN
+
+
+def test_its_own_load_after_the_wait_has_a_stage_of_its_own(renderer):
+    """The stage it waited in is spent (right after startup the default
+    template's load took it): begun then, its own load would have what was
+    left of it, and time out."""
+    _results, loads, _load = _waitingBehindALoad(renderer)
+    assert renderer._active.awaitsLoad and len(loads) == 1
+    renderer._watchdog.start(1000)
+
+    renderer._on_loading_changed(_Ended(renderer._load_query))
+    assert _waitUntil(lambda: len(loads) == 2)
+    assert renderer._watchdog.remainingTime() > LONG_TIMEOUT_MS // 2
+
+
+def test_its_own_load_after_the_wait_is_stopped_at_its_timeout(renderer):
+    """Begun just after another load's end, its end may be lost the same
+    way: at its timeout it is stopped and forgotten, and the next render
+    loads its own -- not one timeout more."""
+    results, loads, load = _waitingBehindALoad(renderer)
+    renderer.STAGE_TIMEOUT_MS = 100
+    renderer._on_loading_changed(_Ended(renderer._load_query))
+    assert _waitUntil(lambda: len(results) == 2)
+    assert results[1] == (None, "the render timed out")
+    assert len(loads) == 2
+    assert renderer._load_query is None
+
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": BLUE}, _template("type_a"),
+                         lambda p, e: results.append((p, e)))
+    assert len(loads) == 3
+    load(loads[2])
+    assert _waitUntil(lambda: len(results) == 3)
+    assert _color(results[2][0]) == BLUE
+
+
+def test_with_no_preview_listener_it_does_not_wait_to_be_refused(
+        renderer, monkeypatch):
+    """A load on its way, and no listener to load its own page from: refused
+    now (PREVIEW_UNAVAILABLE), not timed out after waiting for nothing."""
+    from src.AutonaWebServer import WebServer
+    from src.core.RenderLane import PREVIEW_UNAVAILABLE
+
+    results = []
+    renderer._view.load = lambda url: None
+    renderer.STAGE_TIMEOUT_MS = 100
+    renderer.renderAsync({}, {"color": RED}, _template("type_b"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: results)
+    assert renderer._load_query is not None
+
+    monkeypatch.setattr(WebServer, "_preview_port", None)
+    renderer.STAGE_TIMEOUT_MS = LONG_TIMEOUT_MS
+    renderer.renderAsync({}, {"color": GREEN}, _template("type_a"),
+                         lambda p, e: results.append((p, e)))
+    assert _waitUntil(lambda: len(results) == 2, timeout=5)
+    assert results[1] == (None, PREVIEW_UNAVAILABLE)
 
 
 def test_a_failed_load_the_next_render_took_over_is_tried_again(

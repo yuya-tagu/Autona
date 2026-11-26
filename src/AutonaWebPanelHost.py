@@ -489,7 +489,12 @@ class _ShellRequestInterceptor(QWebEngineUrlRequestInterceptor):
     added so far, which a redirect carries along wherever it goes (measured:
     to another origin too). So a request that already carries the header
     and is not one to carry it (a redirect away from /api/v1/) is blocked,
-    whoever set it. The server never redirects there today.
+    whoever set it. The block keeps the answer from the page, not the hop
+    from the next server: QtWebEngine sends a redirect's next hop, the
+    header with it, before this sees it (measured on PySide6 6.11). What
+    keeps the secret home is the server, which sends no redirect to a
+    request carrying the header but to this origin's /api/v1/
+    (WebAccess.ShellRedirectRefusal).
 
     The secret is made on the first request that carries it
     (WebAccess.IssueShellSecret, the only caller). A decision that raises
