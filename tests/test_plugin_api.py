@@ -189,10 +189,15 @@ class FakeHooks:
         self.set = []
         self.answer = None
         self.sample = None
+        self.refreshes = 0
 
-    def _Status(self, enabled=True, params=None):
+    def Refresh(self):
+        self.refreshes += 1
+
+    def _Status(self, enabled=True, params=None,
+                key="post/result_image_saved"):
         return HookStatus(
-            plugin=PLUGIN, key="post/result_image_saved", enabled=enabled,
+            plugin=PLUGIN, key=key, enabled=enabled,
             params=params or {"doc": os.path.join(
                 os.path.abspath(os.sep), "Users", "someone", "secret",
                 "a.txt")},
@@ -619,9 +624,10 @@ def test_busy_says_the_seconds_left(env):
     env.jobs.answer = Refused(StartRefusal.BUSY, remaining_seconds=41.2)
     error = _refused(_run(env, inputs={"log": "20261126"}), 409, "busy")
     assert error["message"] == "42"
-    env.jobs.answer = Refused(StartRefusal.BUSY)
+    # Unknown: no message (the page words busy itself), whatever the detail.
+    env.jobs.answer = Refused(StartRefusal.BUSY, detail="lane")
     assert _refused(_run(env, inputs={"log": "20261126"}), 409,
-                    "busy")["message"] == "busy"
+                    "busy")["message"] == ""
 
 
 @pytest.mark.parametrize("reason", [
@@ -768,11 +774,23 @@ def test_an_artifacts_folder_is_revealed(env):
     _data(env.client.post(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/2"
                           ":reveal"))
     assert env.revealed == [str(out / "c.bin")]
+    _refused(env.client.post(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/0"
+                             ":reveal"), 400, "invalid_request")
+    # Gone (or changed) by the second check: not shown.
+    env.jobs.swap = lambda: env.jobs.artifacts.pop(2)
+    _refused(env.client.post(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/2"
+                             ":reveal"), 404, "not_found")
+    assert env.revealed == [str(out / "c.bin")]
+    _artifacts_again(env, out)
     _refused(env.client.post(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/9"
                              ":reveal"), 404, "not_found")
     env.deps.revealFile = None
     _refused(env.client.post(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/2"
                              ":reveal"), 503, "unavailable")
+
+
+def _artifacts_again(env, out):
+    env.jobs.artifacts[2] = (str(out / "c.bin"), ArtifactKind.FILE)
 
 
 # ── P2: inputs, the developer's, reload ─────────────────────────────────
@@ -793,10 +811,11 @@ def test_the_dev_state_names_folders_by_id_and_name(env):
                                          DEV_PLUGIN)]
     resp = env.client.get(f"{BASE}/dev")
     assert _data(resp) == {"enabled": False, "folders": [
-        {"id": "0123456789ab", "name": "sandbox"}]}
+        {"id": "0123456789ab", "name": "sandbox", "from_env": False}]}
     assert str(env.tmp) not in resp.get_data(as_text=True)
     _data(env.client.patch(f"{BASE}/dev", json={"enabled": True}))
     assert env.registry.devMode is True
+    assert env.hooks.refreshes == 1
     for body in ({"enabled": "yes"}, {}, {"enabled": True, "x": 1}):
         _refused(env.client.patch(f"{BASE}/dev", json=body), 400,
                  "invalid_request")
@@ -805,6 +824,7 @@ def test_the_dev_state_names_folders_by_id_and_name(env):
 def test_a_dev_folder_is_added_from_a_pick(env):
     _data(env.client.post(f"{BASE}/dev/folders", json={"pick": "pick-folder"}))
     assert env.registry.added == [str(env.picked)]
+    assert env.hooks.refreshes == 1
     assert ("folder", "pick-folder") in env.resolved
     _refused(env.client.post(f"{BASE}/dev/folders",
                              json={"pick": "unknown-pick"}),
@@ -817,22 +837,45 @@ def test_a_dev_folder_is_added_from_a_pick(env):
     _refused(env.client.post(f"{BASE}/dev/folders",
                              json={"pick": "pick-folder"}),
              503, "unavailable")
+    assert env.hooks.refreshes == 1
 
 
 def test_a_dev_folder_is_removed_by_its_id(env):
     _data(env.client.delete(f"{BASE}/dev/folders/0123456789ab"))
+    assert env.hooks.refreshes == 1
     env.registry.removeAnswer = False
     _refused(env.client.delete(f"{BASE}/dev/folders/0123456789ab"), 404,
              "not_found")
     _refused(env.client.delete(f"{BASE}/dev/folders/not-an-id"), 404,
              "not_found")
+    assert env.hooks.refreshes == 1
+    # Headless (no dispatcher): nothing to refresh.
+    env.deps.hooks = None
+    env.registry.removeAnswer = True
+    _data(env.client.delete(f"{BASE}/dev/folders/0123456789ab"))
 
 
 def test_only_a_dev_plugin_reloads(env):
     _data(env.client.post(f"{BASE}/{DEV_PLUGIN}:reload"))
     assert env.registry.reloaded == [DEV_PLUGIN]
+    assert env.hooks.refreshes == 1
     _refused(env.client.post(f"{BASE}/{PLUGIN}:reload"), 400,
              "invalid_request")
+
+
+def test_a_reload_that_describes_nothing_says_why(env):
+    env.registry.Reload = lambda pluginId: None
+    _refused(env.client.post(f"{BASE}/{DEV_PLUGIN}:reload"), 409,
+             "incompatible")
+    plugin = env.registry.plugins[DEV_PLUGIN]
+
+    def gone(pluginId):
+        del env.registry.plugins[DEV_PLUGIN]
+
+    env.registry.Reload = gone
+    _refused(env.client.post(f"{BASE}/{DEV_PLUGIN}:reload"), 404,
+             "not_found")
+    env.registry.plugins[DEV_PLUGIN] = plugin
 
 
 # ── P3: actions ─────────────────────────────────────────────────────────
@@ -853,7 +896,7 @@ def test_a_plugin_is_removed(env):
     url = f"{BASE}/{PLUGIN}:remove"
     _data(env.client.post(url, json={"data": True, "runs": "keep_out"}))
     assert env.installer.removed == [(PLUGIN, True, "keep_out")]
-    assert env.registry.scans == 1
+    assert env.registry.scans == 1 and env.hooks.refreshes == 1
     for body in ({"data": 1, "runs": "keep"}, {"data": True, "runs": "x"},
                  {"data": True}):
         _refused(env.client.post(url, json=body), 400, "invalid_request")
@@ -864,10 +907,16 @@ def test_a_plugin_is_removed(env):
 
 def test_a_running_plugin_is_not_removed(env):
     env.jobs.running = True
-    _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
-                             json={"data": False, "runs": "keep"}),
-             409, "busy")
+    assert _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
+                                    json={"data": False, "runs": "keep"}),
+                    409, "busy")["message"] == ""
     assert env.installer.removed == []
+    env.jobs.running = False
+    env.installer.error = "running"
+    assert _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
+                                    json={"data": False, "runs": "keep"}),
+                    409, "busy")["message"] == ""
+    assert env.registry.scans == 0 and env.hooks.refreshes == 0
     env.jobs.running = False
     env.installer.error = "remove_failed"
     _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
@@ -880,6 +929,21 @@ def test_a_running_plugin_is_not_removed(env):
 
 
 # ── P7: hooks ───────────────────────────────────────────────────────────
+
+def test_a_hooks_value_of_a_field_the_job_no_longer_has_is_not_answered(
+        env):
+    path = os.path.join(os.path.abspath(os.sep), "Users", "someone",
+                        "private", "old.txt")
+    env.hooks.Status = lambda pluginId: [
+        env.hooks._Status(params={"doc": path, "gone": path}),
+        env.hooks._Status(params={"doc": path},
+                          key="removed_job/result_image_saved")]
+    resp = env.client.get(f"{BASE}/{PLUGIN}/hooks")
+    rows = _data(resp)
+    assert rows[0]["params"] == {"doc": {"kind": "pick", "name": "old.txt"}}
+    assert rows[1]["params"] == {}
+    assert "private" not in resp.get_data(as_text=True)
+
 
 def test_the_hooks_show_their_values_by_kind(env):
     resp = env.client.get(f"{BASE}/{PLUGIN}/hooks")
@@ -920,3 +984,198 @@ def test_a_hooks_sample_starts_a_run(env):
 def test_hooks_are_unavailable_without_the_dispatcher(env):
     env.deps.hooks = None
     _refused(env.client.get(f"{BASE}/{PLUGIN}/hooks"), 503, "unavailable")
+
+
+# ── the shapes against routes_v1.json types ─────────────────────────────
+
+LIST_KEYS = {"id", "name", "author", "version", "state", "badge",
+             "size_bytes", "has_icon"}
+DETAIL_KEYS = LIST_KEYS | {"description", "reason", "homepage", "funding",
+                           "permissions", "settings", "setting_values",
+                           "jobs"}
+JOB_KEYS = {"id", "title", "lane", "timeout_seconds", "manual", "params",
+            "actions", "hooks"}
+# routes_v1 DevState's folder {id, name}, plus from_env (the env's folders
+# cannot be removed: the contract is to name it).
+DEV_FOLDER_KEYS = {"id", "name", "from_env"}
+
+
+def test_the_types_named_here_are_routes_v1s():
+    types = LEDGER["types"]
+    for key in DETAIL_KEYS - LIST_KEYS:
+        assert key in types["PluginDetail"], key
+    for key in JOB_KEYS:
+        assert key in types["PluginDetail"], key
+    for key in ("enabled", "folders", "id", "name"):
+        assert key in types["DevState"], key
+    assert types["RunStarted"] == "{run_id}"
+
+
+def test_the_detail_and_its_jobs_have_the_types_keys(env):
+    detail = _data(env.client.get(f"{BASE}/{PLUGIN}"))
+    assert set(detail) == DETAIL_KEYS
+    assert all(set(job) == JOB_KEYS for job in detail["jobs"])
+    assert set(detail["permissions"]) == {"network", "files", "spawn",
+                                          "autona_api", "note"}
+    started = _data(_run(env, inputs={"log": "20261126"}), 201)
+    assert set(started) == {"run_id"}
+    env.registry.devFolders = [DevFolder("0123456789ab", str(env.tmp),
+                                         from_env=True)]
+    dev = _data(env.client.get(f"{BASE}/dev"))
+    assert set(dev) == {"enabled", "folders"}
+    assert set(dev["folders"][0]) == DEV_FOLDER_KEYS
+    assert dev["folders"][0]["from_env"] is True
+
+
+def test_a_plugin_whose_manifest_is_unreadable_has_a_whole_detail(env):
+    env.registry.plugins["broken.one"] = RegisteredPlugin(
+        id="broken.one", folder=str(env.tmp), badge=Badge.DEV,
+        report=ManifestReport(None, problems=(ManifestProblem(
+            ManifestCheck.MANIFEST_UNREADABLE, ProblemScope.PLUGIN,
+            "plugin.json", detail="not JSON"),)),
+        state=PluginState.INCOMPATIBLE)
+    detail = _data(env.client.get(f"{BASE}/broken.one"))
+    assert set(detail) == DETAIL_KEYS - {"description"}
+    assert detail["permissions"] == {"network": [], "files": "inputs",
+                                     "spawn": False, "autona_api": "none"}
+    assert detail["name"] == "broken.one"
+    assert detail["settings"] == [] and detail["jobs"] == []
+    assert detail["setting_values"] == {}
+    assert "manifest_unreadable" in detail["reason"]["en"]
+
+
+def test_no_store_is_on_raw_bodies_refusals_and_errors(env, monkeypatch):
+    _artifacts(env)
+    answers = [
+        env.client.get(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/0"),
+        env.client.get(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/2"),
+        env.client.get(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/log"),
+        env.client.patch(f"{BASE}/{PLUGIN}/settings",
+                         json={"values": {"mode": "c"}}),
+        env.client.post(f"{BASE}/{PLUGIN}/runs", json={"job": 3}),
+    ]
+
+    def fail():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(env.registry, "Entries", fail)
+    answers.append(env.client.get(BASE))
+    for resp in answers:
+        assert resp.headers["Cache-Control"] == "no-store"
+        resp.close()
+    assert answers[-1].status_code == 500
+
+
+def test_a_parts_exception_tells_nothing(env, monkeypatch):
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)),
+                      level="DEBUG")
+    secret = os.path.join(os.path.abspath(os.sep), "Users", "someone",
+                          "private-folder")
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"cannot open {secret}")
+
+    try:
+        monkeypatch.setattr(env.registry, "Entries", fail)
+        resp = env.client.get(BASE)
+        assert resp.status_code == 500
+        assert resp.get_json()["error"]["message"] == "internal error"
+        assert "private-folder" not in resp.get_data(as_text=True)
+        monkeypatch.setattr(env.settings, "Save", fail)
+        lines.clear()
+        resp = env.client.patch(f"{BASE}/{PLUGIN}/settings",
+                                json={"values": {"name": "x"}})
+        error = _refused(resp, 503, "unavailable")
+        assert "private-folder" not in json.dumps(error)
+    finally:
+        logger.remove(sink)
+    assert any("RuntimeError" in line for line in lines)
+    assert not any("private-folder" in line for line in lines)
+
+
+def test_settings_values_and_pick_ids_are_not_logged(env):
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)),
+                      level="DEBUG")
+    try:
+        _data(env.client.patch(f"{BASE}/{PLUGIN}/settings", json={
+            "values": {"name": "Typed-By-The-User", "outdir": "pick-folder"}}))
+        _data(env.client.post(f"{BASE}/dev/folders",
+                              json={"pick": "pick-folder"}))
+        _data(_run(env, params={"title": "Hello-Text", "doc": "pick-file"},
+                   inputs={"log": "20261126/Cup"}), 201)
+    finally:
+        logger.remove(sink)
+    assert lines
+    for value in ("Typed-By-The-User", "pick-folder", "pick-file",
+                  "Hello-Text", "Cup", str(env.picked)):
+        assert not any(value in line for line in lines), value
+
+
+def test_a_text_over_its_limit_is_not_served(env, monkeypatch):
+    out = _artifacts(env)
+    url = f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/0"
+    monkeypatch.setattr(api, "TEXT_ARTIFACT_MAX_BYTES", 3)
+    assert _refused(env.client.get(url), 404, "not_found")["message"] == \
+        "the artifact changed"
+    # Grown after fstat (fstat says 1 byte): read to the limit, refused.
+    real_fstat = os.fstat
+
+    def small(fd):
+        info = real_fstat(fd)
+        return os.stat_result((info.st_mode, info.st_ino, info.st_dev,
+                               info.st_nlink, info.st_uid, info.st_gid, 1,
+                               info.st_atime, info.st_mtime, info.st_ctime))
+
+    monkeypatch.setattr(api.os, "fstat", small)
+    assert _refused(env.client.get(url), 404, "not_found")["message"] == \
+        "the artifact changed"
+    monkeypatch.undo()
+    (out / "a.txt").write_text("hello", encoding="utf-8")
+
+
+def test_a_file_artifact_is_sent_up_to_its_checked_size(env, monkeypatch):
+    out = _artifacts(env)
+    (out / "c.bin").write_bytes(b"0123456789")
+    real_fstat = os.fstat
+
+    def four(fd):
+        info = real_fstat(fd)
+        return os.stat_result((info.st_mode, info.st_ino, info.st_dev,
+                               info.st_nlink, info.st_uid, info.st_gid, 4,
+                               info.st_atime, info.st_mtime, info.st_ctime))
+
+    monkeypatch.setattr(api.os, "fstat", four)
+    resp = env.client.get(f"{BASE}/{PLUGIN}/runs/{RUN_ID}/artifacts/2")
+    assert resp.status_code == 200
+    assert resp.data == b"0123"
+    assert resp.headers["Content-Length"] == "4"
+    resp.close()
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", f"/{DEV_PLUGIN}:reload"),
+    ("POST", f"/{PLUGIN}/runs/{RUN_ID}:cancel"),
+    ("POST", f"/{PLUGIN}/runs/{RUN_ID}/artifacts/2:reveal"),
+    ("POST", f"/{PLUGIN}/hooks/post/result_image_saved:sample"),
+    ("DELETE", f"/{PLUGIN}/secrets/token"),
+    ("DELETE", "/dev/folders/0123456789ab")])
+def test_a_route_without_a_body_refuses_a_key(env, method, path):
+    _artifacts(env)
+    _refused(env.client.open(BASE + path, method=method, json={"x": 1}),
+             400, "invalid_request")
+
+
+def test_registering_again_replaces_the_deps_only(env):
+    blueprint = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+    first = api.PluginApiDeps(registry=env.registry)
+    api.RegisterPluginRoutes(blueprint, first)
+    second = api.PluginApiDeps()
+    api.RegisterPluginRoutes(blueprint, second)
+    app = Flask(__name__)
+    app.register_blueprint(blueprint)
+    rules = [rule for rule in app.url_map.iter_rules()
+             if rule.endpoint.startswith("api_v1.")]
+    assert len(rules) == len(api.ROUTES)
+    _refused(app.test_client().get(BASE), 503, "unavailable")

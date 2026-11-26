@@ -3,10 +3,11 @@ of ``docs/plugins/routes_v1.json``, registered onto the v1 blueprint by
 ``RegisterPluginRoutes(blueprint, deps)``.
 
 Nothing is registered on import: the wiring calls RegisterPluginRoutes
-once, before the blueprint is registered on the app (WebServer's
+before the blueprint is registered on the app (WebServer's
 ``_build_web_app``), with a ``PluginApiDeps`` it may fill later -- every
 handler reads its parts per request, and a part not given yet is answered
-503 ``unavailable``. The access classes (WebAccess.ROUTE_ACCESS: the list
+503 ``unavailable``. A later call on the same blueprint adds no rule: it
+replaces the deps the routes read (an app built again in one process). The access classes (WebAccess.ROUTE_ACCESS: the list
 and the icon THIS_PC, the rest SHELL) and the API catalog (none of these
 is in it) are the wiring's, as routes_v1.json says.
 
@@ -16,13 +17,17 @@ artifact are sent raw (fixed Content-Type, ``X-Content-Type-Options:
 nosniff``). A refusal is ``{"ok": false, "error": {"code", "message",
 "reason"}}``: ``reason`` the refusal (contract_1.json refusals, the
 parts' ``Refused``), ``code`` the v1 code of its status, ``message`` its
-detail -- for busy the whole seconds left (rounded up) when known. Every
-answer is no-store.
+detail -- for busy the whole seconds left (rounded up) when known, else
+empty. Every answer is no-store, the raw ones and the errors too. An
+unexpected exception of a part is a read's 500 (``internal error``) and a
+write's 503 ``unavailable``, its type alone logged (E.3: its text may
+name a path).
 
 What the handlers check before a part is called (the parts check again):
 
-- a body is a JSON object with the route's keys only; a value of the wrong
-  type, an unknown key or an unknown pick id is ``invalid_request``;
+- a body is a JSON object with the route's keys only (a route that takes
+  none refuses any key); a value of the wrong type, an unknown key or an
+  unknown pick id is ``invalid_request``;
 - a setting's or a param's value: ``PluginSettings.CheckFieldValue`` (a
   file / folder value is a pick id, resolved by ``deps.resolvePick``);
   ``null`` in a settings body removes the saved value; a param left out
@@ -31,19 +36,33 @@ What the handlers check before a part is called (the parts check again):
   filled with null -- (PluginJobs decides whether that is fine); a choice
   id is a ``PluginInputs.Choices`` id, an action's own file (its page's
   context) the file name in its folder or, for ``archive_export``, the
-  archive job's id;
+  archive job's id (PluginInputs.ARCHIVE_JOB_ID_PATTERN);
 - a plugin, a run, a dev folder by its id (``not_found``).
 
 Never answered: a path (a file / folder value is its name only, a dev
-folder its name), a secret's value, the list's reasons. Logged (the v1
-op log, write_op): the method, the path and the body's keys only -- never
-a value (ADR-009 E.3).
+folder its name, a hook's saved value of a field the job no longer has
+not at all), a secret's value, the list's reasons. A plugin whose
+manifest cannot be read answers the permissions' defaults (nothing
+declared beyond the inputs). Logged (the v1 op log, write_op): the method,
+the path and the body's keys only -- never a value (ADR-009 E.3).
 
 The serving of an artifact re-checks it after opening (PluginJobs N1, the
 TOCTOU of a worker swapping the file): the file is checked
 (``PluginJobs.ArtifactFile``), opened, checked again, and its handle's
 ``fstat`` must be the checked path's file (``st_dev``, ``st_ino``), a
-regular file with one link, within its kind's size.
+regular file with one link, within its kind's size. A text / image is
+read to its limit + 1 byte (more is refused) and sent as bytes; a file /
+json is sent up to the size fstat said, with that Content-Length (a file
+still growing is cut there). A reveal is for a file / json artifact,
+checked twice (the same path both times).
+
+After a registry change succeeds (a dev plugin's reload, the developer
+toggle, a dev folder added / removed, a removal) the handler calls
+``PluginHooks.Refresh()`` (outside every lock; skipped headless). A
+removal does not call ``PluginHooks.Forget(REMOVED)``: that is
+PluginInstaller.Remove's, before it removes the user_data folder. The
+removal and a reload's describe run on the request's thread (I4 decides
+whether the removal becomes a job).
 
 Routes whose part is not in the contract yet (the installs, the listing,
 the update check, the enable toggle, the removal's sizes) answer 503
@@ -60,10 +79,13 @@ import re
 import stat
 from typing import Any, Callable, Optional
 
-from flask import Response, jsonify, request, send_file
+from flask import Response, jsonify, request
+from loguru import logger
+from werkzeug.exceptions import HTTPException
 
 from .AutonaApiV1 import (BODY_NONE, CONFLICT, INVALID_ARGUMENT, NOT_FOUND,
                           UNAVAILABLE, ApiError, api_handler, write_op)
+from .core.PluginInputs import ARCHIVE_JOB_ID_PATTERN
 from .core.PluginJobs import RecordJson
 from .core.PluginSettings import CheckFieldValue
 from .core.PluginTypes import (
@@ -88,9 +110,15 @@ _RUN_ID = re.compile(RUN_ID_PATTERN)
 _DEV_FOLDER_ID = re.compile(DEV_FOLDER_ID_PATTERN)
 _HOOK_KEY = re.compile(HOOK_KEY_PATTERN)
 _INDEX = re.compile(r"^(0|[1-9][0-9]{0,5})$")
-# An archive job's id as an action's context: one name, no separator
-# (PluginInputs checks the job folder itself).
-_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# An archive job's id as an action's context (PluginInputs checks the job
+# folder itself).
+_ARCHIVE_JOB_ID = re.compile(ARCHIVE_JOB_ID_PATTERN)
+# What a file / json artifact is sent in.
+_CHUNK = 64 * 1024
+# The permissions of a plugin whose manifest cannot be read: nothing
+# declared beyond the inputs.
+_NO_PERMISSIONS = {"network": [], "files": "inputs", "spawn": False,
+                   "autona_api": "none"}
 
 # contract_1.json refusals: the reason's status and that status's v1 code.
 _STATUS = {
@@ -157,20 +185,26 @@ def _NoStore(fn):
 
 
 def _Raise(reason: StartRefusal, detail: str = ""):
+    """The v1 error of ``reason``. Busy's message is the seconds left or
+    empty (the page words it); another's its detail, else its reason."""
     code, status = _STATUS.get(reason, _CONFLICT)
-    return ApiError(code, detail or reason.value, status,
-                    reason=reason.value)
+    message = detail if reason is StartRefusal.BUSY \
+        else detail or reason.value
+    return ApiError(code, message, status, reason=reason.value)
 
 
 def _Refused(refused: Refused):
-    """A part's Refused as the v1 error (busy: the seconds left)."""
+    """A part's Refused as the v1 error (busy: the whole seconds left,
+    rounded up, when known; else no message)."""
     reason = StartRefusal(refused.reason)
     detail = refused.detail
-    if reason is StartRefusal.BUSY and refused.remaining_seconds is not None:
-        try:
-            detail = str(max(0, math.ceil(refused.remaining_seconds)))
-        except (OverflowError, ValueError):
-            pass
+    if reason is StartRefusal.BUSY:
+        detail = ""
+        if refused.remaining_seconds is not None:
+            try:
+                detail = str(max(0, math.ceil(refused.remaining_seconds)))
+            except (OverflowError, ValueError):
+                pass
     return _Raise(reason, detail)
 
 
@@ -191,6 +225,13 @@ def _Part(deps, name):
     if part is None:
         raise _Unavailable(f"plugins: {name} is not ready")
     return part
+
+
+def _Refresh(deps):
+    """The hooks read their plugins again after the registry changed
+    (PluginHooks.Refresh: after a Scan, never inside it). None headless."""
+    if deps.hooks is not None:
+        deps.hooks.Refresh()
 
 
 def _Shown(key):
@@ -311,7 +352,7 @@ def _JobJson(job):
 
 def _PermissionsJson(permissions):
     if permissions is None:
-        return None
+        return dict(_NO_PERMISSIONS, network=[])
     out = {"network": list(permissions.network), "files": permissions.files,
            "spawn": bool(permissions.spawn),
            "autona_api": permissions.autona_api}
@@ -421,11 +462,10 @@ def get_plugin_icon(deps, plugin_id):
 
 def get_plugin(deps, plugin_id):
     plugin = _Plugin(deps, plugin_id)
-    registry = deps.registry
-    entry = next((row for row in registry.Entries()
-                  if row.id == plugin.id), None)
     manifest = plugin.report.manifest
-    data = _EntryJson(entry) if entry is not None else {
+    # The list row's fields, as PluginRegistry.Entries makes them, from
+    # this plugin's Get (its state now, as its reason).
+    data = {
         "id": plugin.id,
         "name": _TextOut(manifest.name) if manifest else plugin.id,
         "author": manifest.author if manifest else "",
@@ -434,8 +474,6 @@ def get_plugin(deps, plugin_id):
         "badge": Badge(plugin.badge).value,
         "size_bytes": int(plugin.size_bytes),
         "has_icon": bool(plugin.has_icon)}
-    # The detail's state is the plugin's now (Get), as its reason.
-    data["state"] = PluginState(plugin.state).value
     values = {}
     if manifest is not None:
         dev = _Dev(plugin)
@@ -486,10 +524,19 @@ def plugin_settings_update(deps, plugin_id):
 
 
 def plugin_reload(deps, plugin_id):
+    _Body(())
     plugin = _Plugin(deps, plugin_id)
     if not _Dev(plugin):
         raise _Invalid("not a dev plugin")
-    deps.registry.Reload(plugin.id)
+    # describe runs here, up to DESCRIBE_TIMEOUT_SECONDS (the page's call
+    # waits longer than that).
+    result = deps.registry.Reload(plugin.id)
+    _Refresh(deps)
+    if result is None:
+        after = deps.registry.Get(plugin.id)
+        if after is None or not _Dev(after):
+            raise _NotFound("no such dev plugin")
+        raise _Raise(StartRefusal.INCOMPATIBLE, "the manifest is not usable")
     return _Ok()
 
 
@@ -524,8 +571,9 @@ def _TriggerOf(raw):
 
 
 def _StateRefusal(plugin):
-    """The plugin's state's refusal before a body is checked (PluginJobs'
-    order: blocked, incompatible, disabled), else None."""
+    """The plugin's state's refusal (PluginJobs' order: blocked,
+    incompatible, disabled), else None: checked after the body's shape
+    (its keys, the job id's type, the trigger) and before its values."""
     state = PluginState(plugin.state)
     if state is PluginState.BLOCKED or plugin.blocked_reason is not None:
         return StartRefusal.BLOCKED
@@ -582,7 +630,7 @@ def _Picks(deps, job, trigger, raw):
         if kind is fills and kind is FieldType.ARCHIVE_EXPORT:
             # The action's context: the archive job's id, its folder the
             # work folder's (PluginInputs checks it).
-            if not _NAME.fullmatch(choice):
+            if not _ARCHIVE_JOB_ID.fullmatch(choice):
                 raise _Invalid(f"{key}: not an archive job")
             work = deps.workDir() if deps.workDir is not None else None
             if not work:
@@ -634,6 +682,7 @@ def get_plugin_run(deps, plugin_id, run_id):
 
 
 def plugin_run_cancel(deps, plugin_id, run_id):
+    _Body(())
     record = _Run(deps, plugin_id, run_id)
     # A run that has ended is left as it is: the page reads its record.
     deps.jobs.Cancel(plugin_id, record.run_id)
@@ -660,12 +709,33 @@ def _Identity(info):
     return info.st_dev, info.st_ino
 
 
+class _Limited:
+    """A file / json artifact's body: its open handle, read up to ``size``
+    bytes (fstat's when checked), closed when the answer is."""
+
+    def __init__(self, handle, size):
+        self.handle = handle
+        self.size = size
+
+    def __iter__(self):
+        left = self.size
+        while left > 0:
+            chunk = self.handle.read(min(_CHUNK, left))
+            if not chunk:
+                break
+            left -= len(chunk)
+            yield chunk
+
+    def close(self):
+        self.handle.close()
+
+
 def _OpenArtifact(jobs, pluginId, runId, index):
-    """(the open file, kind) of an accepted artifact, re-checked after
-    opening: the handle's fstat must be the checked path's file (st_dev,
-    st_ino), a regular file with one link, within its kind's size (L8
-    review N1: a worker swapping the file between the check and the
-    open)."""
+    """(the open file, its path, kind, fstat) of an accepted artifact,
+    re-checked after opening: the handle's fstat must be the checked path's
+    file (st_dev, st_ino), a regular file with one link, within its kind's
+    size (L8 review N1: a worker swapping the file between the check and
+    the open)."""
     found = jobs.ArtifactFile(pluginId, runId, index)
     if found is None:
         raise _NotFound("no such artifact")
@@ -681,8 +751,7 @@ def _OpenArtifact(jobs, pluginId, runId, index):
                 os.path.normcase(again[0]) != os.path.normcase(path):
             raise _NotFound("no such artifact")
         checked = os.stat(again[0])
-        limit = {ArtifactKind.TEXT: TEXT_ARTIFACT_MAX_BYTES,
-                 ArtifactKind.IMAGE: IMAGE_ARTIFACT_MAX_BYTES}.get(kind)
+        limit = _Limit(kind)
         if (_Identity(opened) != _Identity(checked)
                 or not stat.S_ISREG(opened.st_mode) or opened.st_nlink > 1
                 or (limit is not None and opened.st_size > limit)):
@@ -693,32 +762,62 @@ def _OpenArtifact(jobs, pluginId, runId, index):
     except BaseException:
         handle.close()
         raise
-    return handle, path, kind
+    return handle, path, kind, opened
+
+
+def _Limit(kind):
+    return {ArtifactKind.TEXT: TEXT_ARTIFACT_MAX_BYTES,
+            ArtifactKind.IMAGE: IMAGE_ARTIFACT_MAX_BYTES}.get(kind)
 
 
 def get_plugin_run_artifact(deps, plugin_id, run_id, no):
     index = _Index(no)
     record = _Run(deps, plugin_id, run_id)
-    handle, path, kind = _OpenArtifact(deps.jobs, plugin_id, record.run_id,
-                                       index)
-    contentType = _ContentType(path, kind)
-    if contentType is None:
-        handle.close()
-        raise _NotFound("no such artifact")
-    resp = send_file(handle, mimetype=contentType, conditional=False)
-    # As the kind says, exactly (send_file would add a second charset).
-    resp.headers["Content-Type"] = contentType
+    handle, path, kind, opened = _OpenArtifact(deps.jobs, plugin_id,
+                                               record.run_id, index)
+    try:
+        contentType = _ContentType(path, kind)
+        if contentType is None:
+            raise _NotFound("no such artifact")
+        limit = _Limit(kind)
+        if limit is not None:
+            # Read here, to the limit: a file that grew since fstat is
+            # refused, never sent past it.
+            try:
+                data = handle.read(limit + 1)
+            except OSError:
+                raise _NotFound("the artifact cannot be read") from None
+            if len(data) > limit:
+                raise _NotFound("the artifact changed")
+            resp = Response(data, content_type=contentType)
+        else:
+            resp = Response(_Limited(handle, opened.st_size),
+                            content_type=contentType,
+                            direct_passthrough=True)
+            resp.headers["Content-Length"] = str(opened.st_size)
+            handle = None
+    finally:
+        if handle is not None:
+            handle.close()
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
 
 def plugin_run_artifact_reveal(deps, plugin_id, run_id, no):
+    _Body(())
     index = _Index(no)
     record = _Run(deps, plugin_id, run_id)
     found = deps.jobs.ArtifactFile(plugin_id, record.run_id, index)
     if found is None:
         raise _NotFound("no such artifact")
-    if deps.revealFile is None or not deps.revealFile(found[0]):
+    if ArtifactKind(found[1]) not in (ArtifactKind.FILE, ArtifactKind.JSON):
+        raise _Invalid("only a file / json artifact's folder is shown")
+    # Checked again just before Explorer gets it: the same path.
+    again = deps.jobs.ArtifactFile(plugin_id, record.run_id, index)
+    if again is None or os.path.normcase(again[0]) != os.path.normcase(
+            found[0]):
+        raise _NotFound("no such artifact")
+    if deps.revealFile is None or not deps.revealFile(again[0]):
         raise _Unavailable("the folder could not be shown")
     return _Ok()
 
@@ -727,7 +826,9 @@ def plugin_run_artifact_reveal(deps, plugin_id, run_id, no):
 
 def get_plugin_dev(deps):
     registry = _Part(deps, "registry")
-    folders = [{"id": folder.id, "name": _Name(folder.path) or folder.id}
+    # from_env: AUTONA_PLUGIN_DEV's, which the page cannot remove.
+    folders = [{"id": folder.id, "name": _Name(folder.path) or folder.id,
+                "from_env": bool(folder.from_env)}
                for folder in registry.DevFolders()]
     return _Ok({"enabled": bool(registry.DevMode()), "folders": folders})
 
@@ -739,6 +840,7 @@ def plugin_dev_update(deps):
     refused = _Part(deps, "registry").SetDevMode(body["enabled"])
     if isinstance(refused, Refused):
         raise _Refused(refused)
+    _Refresh(deps)
     return _Ok()
 
 
@@ -755,10 +857,12 @@ def plugin_dev_folder_add(deps):
     result = registry.AddDevFolder(path)
     if isinstance(result, Refused):
         raise _Refused(result)
+    _Refresh(deps)
     return _Ok()
 
 
 def plugin_dev_folder_remove(deps, folder_id):
+    _Body(())
     registry = _Part(deps, "registry")
     if not isinstance(folder_id, str) or not _DEV_FOLDER_ID.fullmatch(
             folder_id):
@@ -768,6 +872,7 @@ def plugin_dev_folder_remove(deps, folder_id):
         raise _Refused(result)
     if not result:
         raise _NotFound("no such dev folder")
+    _Refresh(deps)
     return _Ok()
 
 
@@ -816,6 +921,7 @@ def plugin_secret_update(deps, plugin_id, key):
 
 
 def plugin_secret_delete(deps, plugin_id, key):
+    _Body(())
     plugin = _Plugin(deps, plugin_id)
     _SecretField(plugin, key)
     try:
@@ -850,7 +956,9 @@ def plugin_remove(deps, plugin_id):
         raise _Invalid("not an installed plugin")
     installer = _Part(deps, "installer")
     if _Part(deps, "jobs").Running(plugin.id):
-        raise _Raise(StartRefusal.BUSY, "running")
+        raise _Raise(StartRefusal.BUSY)
+    # Not Forget(REMOVED) here: PluginInstaller.Remove's, before it removes
+    # the user_data folder.
     try:
         installer.Remove(plugin.id, data=body["data"], runs=body["runs"])
     except Exception as error:
@@ -858,20 +966,27 @@ def plugin_remove(deps, plugin_id):
         if not isinstance(code, str):
             raise
         reason = _REMOVE_REFUSALS.get(code, StartRefusal.UNAVAILABLE)
-        raise _Raise(reason, code) from None
+        raise _Raise(reason, "" if reason is StartRefusal.BUSY
+                     else code) from None
     deps.registry.Scan()
+    _Refresh(deps)
     return _Ok()
 
 
 # ── P7: hooks ───────────────────────────────────────────────────────────
 
 def _HookJson(status, job):
-    fields = {field.key: field for field in (job.params if job else ())}
+    """A hook's row. Its saved values of the job's value fields only, a
+    file / folder by its name: a key the job no longer has (an update
+    changed its fields, the job is gone) is not answered -- it may hold a
+    path."""
+    fields = {field.key: field for field in (job.params if job else ())
+              if field.type not in SOURCE_FIELD_TYPES}
     params = {}
     for key, value in dict(status.params).items():
         field = fields.get(key)
-        params[key] = _ValueShown(field, value) if field is not None \
-            else {"kind": "value", "value": value}
+        if field is not None:
+            params[key] = _ValueShown(field, value)
     error = status.last_error
     jobId, _slash, on = status.key.partition("/")
     return {
@@ -930,6 +1045,7 @@ def plugin_hook_update(deps, plugin_id, job_id, on):
 
 
 def plugin_hook_sample(deps, plugin_id, job_id, on):
+    _Body(())
     plugin = _Plugin(deps, plugin_id)
     key = _HookKey(job_id, on)
     result = _Part(deps, "hooks").TrySample(plugin.id, key)
@@ -1026,28 +1142,69 @@ ROUTES = (
 )
 
 
-def _View(deps, name, handler, how):
-    bound = functools.partial(handler, deps)
+def _Guarded(name, call):
+    """A write's call: an unexpected exception of a part is logged by its
+    type alone (its text may name a path: E.3) and answered 503
+    unavailable, not write_op's 500 with the traceback."""
+    @functools.wraps(call)
+    def guarded(**kwargs):
+        try:
+            return call(**kwargs)
+        except (ApiError, HTTPException):
+            raise
+        except Exception as error:
+            logger.warning(f"Plugins API: {name} failed "
+                           f"({type(error).__name__})")
+            raise _Unavailable("the host could not carry it out") from None
+
+    return guarded
+
+
+class _Bound:
+    """The deps a blueprint's plugin routes read (replaced by a later
+    RegisterPluginRoutes on the same blueprint)."""
+
+    def __init__(self, deps):
+        self.deps = deps
+
+
+def _View(bound, name, handler, how):
+    def call(**kwargs):
+        return handler(bound.deps, **kwargs)
+
+    call.__name__ = name
     operation = "plugins." + name
     if how == _READ:
-        view = api_handler(bound)
+        view = api_handler(call)
     elif how == _UPLOAD:
         # The zip's bytes are never read or logged here.
-        view = write_op(operation, body=BODY_NONE)(bound)
+        view = write_op(operation, body=BODY_NONE)(_Guarded(name, call))
     else:
         # Logged by key only: a body may hold a secret, a path's pick id
         # or a user's text (E.3).
-        view = write_op(operation, log_keys_only=True)(bound)
+        view = write_op(operation, log_keys_only=True)(_Guarded(name, call))
     return _NoStore(view)
+
+
+# The attribute a blueprint carries once its plugin routes are added.
+_BOUND_ATTRIBUTE = "_autonaPluginRoutes"
 
 
 def RegisterPluginRoutes(blueprint, deps: PluginApiDeps) -> None:
     """Add every route of ROUTES to ``blueprint`` (the v1 blueprint, whose
-    url_prefix is /api/v1), its handlers bound to ``deps``. Called once,
-    before the blueprint is registered on the app."""
+    url_prefix is /api/v1), its handlers reading ``deps``. Before the
+    blueprint is registered on an app. Called again on the same blueprint
+    (an app built again in one process), it adds no rule and the routes
+    read the new ``deps``."""
+    bound = getattr(blueprint, _BOUND_ATTRIBUTE, None)
+    if bound is not None:
+        bound.deps = deps
+        return
+    bound = _Bound(deps)
     for method, path, name, handler, how in ROUTES:
         if not path.startswith(V1_PREFIX):
             raise ValueError(f"not a v1 path: {path}")
         blueprint.add_url_rule(path[len(V1_PREFIX):], endpoint=name,
-                               view_func=_View(deps, name, handler, how),
+                               view_func=_View(bound, name, handler, how),
                                methods=[method])
+    setattr(blueprint, _BOUND_ATTRIBUTE, bound)
