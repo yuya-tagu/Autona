@@ -4,16 +4,20 @@ and checks every manifest, keeps the list, judges ``describe`` answers.
 Where plugins come from (``Scan``):
 
 - the built-in vodsplit (D9): a manifest made here (``BUILTIN_ID``, lane
-  heavy, no time limit, manual only -- its own page) that points at the
+  heavy, no time limit -- ``timeout_seconds`` None, which PluginTypes'
+  ``Job`` is to allow --, manual only: its own page) that points at the
   folder ArchiveWorker already uses (``ArchiveWorker.WORKER_DIR`` under the
   Autona folder). Never checked against the schema, never disabled or
   blocked; its own way of starting (``version`` for describe,
   ``--cancel-on-stdin``) is ``BUILTIN_VODSPLIT``;
 - the installed ones: ``<Autona folder>/plugins/<id>/plugin.json`` (the
-  folder's name is the id; ``.new`` / ``.old`` folders -- a swap's -- are
-  skipped);
+  folder's name is the id; ``<id>.new`` / ``<id>.old`` folders -- a swap's
+  -- are skipped);
 - the dev folders (D4): ``user_data/plugins/dev.json``'s list while its
-  toggle is on, and ``AUTONA_PLUGIN_DEV`` (``;``-separated, always). A dev
+  toggle is on, and ``AUTONA_PLUGIN_DEV`` (``;``-separated, always).
+  ``DevFolders`` names dev.json's while the toggle is off too
+  (``DevFolderActive``). A broken dev.json is moved aside before the next
+  write, never overwritten. A dev
   folder is named by ``DevFolderId`` (the first 12 hex digits of the
   SHA-256 of its normalised absolute path), never by its position.
 
@@ -21,7 +25,10 @@ An id has one owner: the built-in, then the installed ones, then the dev
 folders in order. A dev folder whose id is taken is refused (``id_taken``,
 ``DevFolderProblems``) and is not listed: both entrances (``AddDevFolder``
 here, the installer there) refuse the later one, so the two meet only when
-someone copied a folder by hand, and then the installed one stays.
+someone copied a folder by hand, and then the installed one stays. A
+refused folder is in ``RefusedFolders`` (a list row's id names one plugin).
+A manifest that breaks the check itself is its folder's
+``manifest_unreadable``, never the scan's end; one Scan runs at a time.
 
 ``Check`` is the manifest's whole check (contract_1.json manifest_checks):
 plugin.schema.json written out in Python (jsonschema is not a dependency)
@@ -59,6 +66,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from loguru import logger
@@ -92,6 +100,10 @@ OFFICIAL_REPO_IDS = frozenset()
 # A swap's leftovers, never a plugin (PluginInstaller sweeps them).
 _SKIPPED_SUFFIXES = (".new", ".old")
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# dev.json's os.replace: a reader holding it open on Windows fails it for a
+# moment (StateManager._atomic_write_bytes's budget).
+_REPLACE_ATTEMPTS = 4
+_REPLACE_BACKOFF = 0.02
 
 
 @dataclasses.dataclass(frozen=True)
@@ -156,7 +168,9 @@ def ReadManifest(folder: str) -> Tuple[Any, Optional[ManifestProblem]]:
     except UnicodeDecodeError:
         return None, _Unreadable("not UTF-8")
     except ValueError as error:
-        return None, _Unreadable(f"not JSON: {error.msg}")
+        return None, _Unreadable(f"not JSON: {getattr(error, 'msg', error)}")
+    except RecursionError:
+        return None, _Unreadable("nested too deep")
 
 
 def _Unreadable(detail):
@@ -180,15 +194,32 @@ def UsableJobs(report: ManifestReport) -> Tuple[Job, ...]:
 
 
 def _Version(text):
-    if not isinstance(text, str) or not re.match(VERSION_PATTERN, text):
+    if not isinstance(text, str) or not re.fullmatch(VERSION_PATTERN, text):
         return None
-    return tuple(int(part) for part in text.split("."))
+    try:
+        return tuple(int(part) for part in text.split("."))
+    except ValueError:  # past int()'s digit limit
+        return None
 
 
 # ── the value checks (plugin.schema.json's keywords) ────────────────────
 
 def _IsInt(value):
-    return isinstance(value, int) and not isinstance(value, bool)
+    """JSON Schema's integer: 1.0 is one too (bool is not)."""
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, int) or (isinstance(value, float)
+                                      and value.is_integer())
+
+
+def _AsInt(value, fallback=None):
+    return int(value) if _IsInt(value) else fallback
+
+
+def _ReservedDeviceName(part):
+    """A Windows device name (con, nul, aux, prn, com1-9, lpt1-9): no file
+    or folder can be named by it, with or without an extension."""
+    return re.fullmatch(r"(con|nul|aux|prn|com[1-9]|lpt[1-9])", part) is not None
 
 
 def _IsNumber(value):
@@ -204,7 +235,7 @@ def _IsText(value, maxLength=None, minLength=1):
         return good(value)
     if isinstance(value, dict):
         return bool(value) and all(
-            isinstance(key, str) and _LOCALE.match(key) and good(text)
+            isinstance(key, str) and _LOCALE.fullmatch(key) and good(text)
             for key, text in value.items())
     return False
 
@@ -231,11 +262,23 @@ def _Inside(base, path):
 
 
 def _FolderSize(folder):
-    total = 0
-    for top, _dirs, files in os.walk(folder):
-        for name in files:
+    """The bytes of the files under ``folder``; links and junctions are not
+    followed (one pointing at C:\\ is not the plugin's size)."""
+    total, stack = 0, [folder]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in entries:
             try:
-                total += os.lstat(os.path.join(top, name)).st_size
+                if entry.is_symlink() or getattr(entry, "is_junction",
+                                                 lambda: False)():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
             except OSError:
                 pass
     return total
@@ -267,7 +310,7 @@ class PluginRegistry:
     are under it), ``userDataDir`` the ``user_data`` folder (``plugins/
     dev.json``). The callables (each optional, called outside the lock):
 
-    - ``describe(pluginDir, entry, dev) -> DescribeRun``: PluginRunner.Describe;
+    - ``describe(pluginDir, entry, *, dev) -> DescribeRun``: PluginRunner.Describe;
     - ``installSource(pluginId) -> Optional[InstallSource]``: install.json's
       source (the ``taguyan.`` reservation; ``github`` shows as listed,
       anything else as manual). Default: manual;
@@ -275,7 +318,7 @@ class PluginRegistry:
       reason. Default: never;
     - ``isEnabled(pluginId) -> bool``: default True;
     - ``isRunning(pluginId) -> bool``: default False;
-    - ``settingsMissing(pluginId, manifest, dev) -> Sequence[str]``:
+    - ``settingsMissing(pluginId, manifest, *, dev) -> Sequence[str]``:
       PluginSettings.Missing. Default: none;
     - ``builtinVersion() -> Optional[str]``: the vodsplit worker's version
       the archive page last probed. Default: unknown ("");
@@ -302,14 +345,22 @@ class PluginRegistry:
         self._blockedBy = blockedBy or (lambda _id, _version: None)
         self._isEnabled = isEnabled or (lambda _id: True)
         self._isRunning = isRunning or (lambda _id: False)
-        self._settingsMissing = settingsMissing or (lambda *_a: ())
+        self._settingsMissing = settingsMissing or (lambda *_a, **_k: ())
         self._builtinVersion = builtinVersion or (lambda: "")
         self._environ = environ or (lambda: os.environ)
         self._which = which or shutil.which
         self._officialRepoIds = frozenset(officialRepoIds)
+        # Lock order: _scanLock -> _lock, _devLock -> _lock. _scanLock and
+        # _devLock are never held together (Scan runs after a dev.json write).
         self._lock = threading.Lock()
-        # dev.json's read-modify-write (_lock may be taken inside it, never the other way).
+        # One Scan at a time: a slower earlier one never overwrites a later.
+        self._scanLock = threading.Lock()
+        # dev.json's read-modify-write.
         self._devLock = threading.Lock()
+        # (normcase(folder), st_ino, st_mtime_ns) -> bytes
+        self._sizes: Dict[Tuple[str, int, int], int] = {}
+        self._activeDevIds: frozenset = frozenset()
+        self._refused: Tuple[Tuple[str, Tuple[ManifestProblem, ...]], ...] = ()
         # id -> RegisteredPlugin (state is computed when asked), in order.
         self._plugins: Dict[str, RegisteredPlugin] = {}
         self._devFolders: Tuple[DevFolder, ...] = ()
@@ -343,14 +394,20 @@ class PluginRegistry:
         if not _IsInt(version):
             found.plugin(ManifestCheck.INVALID_FIELD, "manifest")
             return ManifestReport(None, tuple(found.items))
-        if version not in HOST_READS_MANIFESTS:
+        if int(version) not in HOST_READS_MANIFESTS:
             found.plugin(ManifestCheck.MANIFEST_VERSION_UNKNOWN, "manifest",
                          str(version))
             return ManifestReport(None, tuple(found.items))
         pluginId = raw.get("id")
-        if not (isinstance(pluginId, str) and re.match(PLUGIN_ID_PATTERN, pluginId)
+        if not (isinstance(pluginId, str)
+                and re.fullmatch(PLUGIN_ID_PATTERN, pluginId)
                 and len(pluginId) <= PLUGIN_ID_MAX_LENGTH):
             found.plugin(ManifestCheck.INVALID_FIELD, "id")
+            return ManifestReport(None, tuple(found.items))
+        if any(_ReservedDeviceName(part) for part in pluginId.split(".")):
+            # plugins/<id>/ and user_data/plugins/<id>/ could not be made.
+            found.plugin(ManifestCheck.INVALID_FIELD, "id",
+                         "a Windows device name")
             return ManifestReport(None, tuple(found.items))
         if not dev and os.path.basename(os.path.normpath(folder)) != pluginId:
             found.plugin(ManifestCheck.ID_FOLDER_MISMATCH, "id")
@@ -379,7 +436,7 @@ class PluginRegistry:
         for key in ("homepage", "funding"):
             if key in raw and not (isinstance(raw[key], str)
                                    and len(raw[key]) <= URL_MAX_LENGTH
-                                   and _HTTPS_URL.match(raw[key])):
+                                   and _HTTPS_URL.fullmatch(raw[key])):
                 found.plugin(invalid, key)
         if not (isinstance(raw.get("license"), str) and raw["license"]):
             found.plugin(invalid, "license")
@@ -401,7 +458,7 @@ class PluginRegistry:
 
         platforms = raw.get("platforms")
         if not (_IsUniqueList(platforms) and platforms and all(
-                isinstance(item, str) and re.match(PLATFORM_PATTERN, item)
+                isinstance(item, str) and re.fullmatch(PLATFORM_PATTERN, item)
                 for item in platforms)):
             found.plugin(invalid, "platforms")
         elif HOST_PLATFORM not in platforms:
@@ -420,7 +477,7 @@ class PluginRegistry:
         if "update" in raw:
             update = raw["update"]
             if not (isinstance(update, dict) and isinstance(update.get("github"), str)
-                    and _GITHUB_REPO.match(update["github"])):
+                    and _GITHUB_REPO.fullmatch(update["github"])):
                 found.plugin(invalid, "update")
 
         permissions = raw.get("permissions")
@@ -429,7 +486,7 @@ class PluginRegistry:
         else:
             network = permissions.get("network")
             if not (_IsUniqueList(network) and all(
-                    isinstance(host, str) and _HOST_NAME.match(host)
+                    isinstance(host, str) and _HOST_NAME.fullmatch(host)
                     for host in network)):
                 found.plugin(invalid, "permissions.network")
             if permissions.get("files") not in _FILES_SCOPES:
@@ -463,7 +520,7 @@ class PluginRegistry:
         if head.startswith(RESERVED_ENTRY_PREFIX):
             found.plugin(ManifestCheck.ENTRY_RESERVED, "entry[0]")
             return
-        if not _ENTRY_HEAD.match(head):
+        if not _ENTRY_HEAD.fullmatch(head):
             found.plugin(ManifestCheck.INVALID_FIELD, "entry[0]")
             return
         path = os.path.join(folder, head)
@@ -484,7 +541,7 @@ class PluginRegistry:
 
     @staticmethod
     def _IconProblem(folder, icon):
-        if not icon.lower().endswith(".png") or not _ENTRY_HEAD.match(icon):
+        if not icon.lower().endswith(".png") or not _ENTRY_HEAD.fullmatch(icon):
             return "not a relative .png path"
         path = os.path.join(folder, icon)
         if not _Inside(folder, path):
@@ -526,13 +583,13 @@ class PluginRegistry:
                 report(invalid, path)
                 continue
             key, kind = item.get("key"), item.get("type")
-            if not (isinstance(key, str) and re.match(FIELD_KEY_PATTERN, key)):
+            if not (isinstance(key, str) and re.fullmatch(FIELD_KEY_PATTERN, key)):
                 report(invalid, f"{path}.key")
             elif key in keys:
                 report(ManifestCheck.KEY_DUPLICATE, f"{path}.key", key)
             else:
                 keys.add(key)
-            if not (isinstance(kind, str) and re.match(NAME_PATTERN, kind)):
+            if not (isinstance(kind, str) and re.fullmatch(NAME_PATTERN, kind)):
                 report(invalid, f"{path}.type")
                 kind = None
             if not _IsText(item.get("label")):
@@ -549,8 +606,11 @@ class PluginRegistry:
                     report(invalid, f"{path}.{extra}")
             if "step" in item and not (_IsNumber(item["step"]) and item["step"] > 0):
                 report(invalid, f"{path}.step")
-            for extra in ("options", "extensions"):
-                if extra in item and not isinstance(item[extra], list):
+            for extra, owner in (("options", FieldType.SELECT),
+                                 ("extensions", FieldType.FILE)):
+                # The owning type's own check reports it (once).
+                if (extra in item and not isinstance(item[extra], list)
+                        and kind != owner):
                     report(invalid, f"{path}.{extra}")
             if kind is not None:
                 self._CheckType(item, kind, path, where, report, invalid)
@@ -605,7 +665,7 @@ class PluginRegistry:
         elif kind == FieldType.FILE:
             extensions = item.get("extensions")
             if not (_IsUniqueList(extensions) and extensions and all(
-                    isinstance(ext, str) and re.match(FILE_EXTENSION_PATTERN, ext)
+                    isinstance(ext, str) and re.fullmatch(FILE_EXTENSION_PATTERN, ext)
                     for ext in extensions)):
                 report(invalid, f"{path}.extensions")
             if has and not isinstance(default, str):
@@ -634,7 +694,7 @@ class PluginRegistry:
         def problem(code, where="", detail=""):
             found.job(code, name, f"{path}.{where}" if where else path, detail)
 
-        if not (isinstance(jobId, str) and re.match(JOB_ID_PATTERN, jobId)):
+        if not (isinstance(jobId, str) and re.fullmatch(JOB_ID_PATTERN, jobId)):
             problem(invalid, "id")
         if not _IsText(raw.get("title")):
             problem(invalid, "title")
@@ -683,7 +743,7 @@ class PluginRegistry:
         for index, action in enumerate(actions):
             where = f"actions[{index}]"
             if not (isinstance(action, dict) and isinstance(action.get("target"), str)
-                    and re.match(NAME_PATTERN, action["target"])
+                    and re.fullmatch(NAME_PATTERN, action["target"])
                     and _IsText(action.get("label"))):
                 problem(invalid, where)
                 continue
@@ -696,7 +756,7 @@ class PluginRegistry:
         for index, hook in enumerate(hooks):
             where = f"hooks[{index}]"
             if not (isinstance(hook, dict) and isinstance(hook.get("on"), str)
-                    and re.match(NAME_PATTERN, hook["on"])
+                    and re.fullmatch(NAME_PATTERN, hook["on"])
                     and _IsText(hook.get("label"))):
                 problem(invalid, where)
                 continue
@@ -718,7 +778,8 @@ class PluginRegistry:
         if builtHooks and isinstance(raw.get("params"), list):
             for index, item in enumerate(raw["params"]):
                 if (isinstance(item, dict) and item.get("required") is True
-                        and item.get("type") not in SOURCE_FIELD_TYPES
+                        and isinstance(item.get("type"), str)
+                        and item["type"] not in SOURCE_FIELD_TYPES
                         and "default" not in item):
                     problem(ManifestCheck.HOOK_PARAM_NEEDS_DEFAULT,
                             f"params[{index}].default", str(item.get("key")))
@@ -728,8 +789,8 @@ class PluginRegistry:
         return Job(
             id=name, title=raw.get("title") if _IsText(raw.get("title")) else name,
             lane=lane if isinstance(lane, str) else "",
-            timeout_seconds=timeout if _IsInt(timeout) else 0,
-            memory_mb=memory if _IsInt(memory) else None,
+            timeout_seconds=_AsInt(timeout, 0),
+            memory_mb=_AsInt(memory),
             params=params, manual=manual if isinstance(manual, bool) else True,
             actions=tuple(builtActions), hooks=tuple(builtHooks))
 
@@ -775,11 +836,10 @@ class PluginRegistry:
             type=kind or "",
             label=item["label"] if _IsText(item.get("label")) else str(key),
             required=item.get("required") is True,
-            default=(None if kind in SOURCE_FIELD_TYPES
+            default=(None if kind in SOURCE_FIELD_TYPES or kind == FieldType.SECRET
                      else item.get("default")),
             help=item["help"] if _IsText(item.get("help")) else None,
-            max_length=(item["max_length"] if _IsInt(item.get("max_length"))
-                        else None),
+            max_length=_AsInt(item.get("max_length")),
             min=number("min"), max=number("max"), step=number("step"),
             options=options, extensions=extensions)
 
@@ -794,7 +854,7 @@ class PluginRegistry:
 
         def ints(key):
             value = raw.get(key)
-            return tuple(v for v in value if _IsInt(v)) if isinstance(value, list) else ()
+            return tuple(int(v) for v in value if _IsInt(v)) if isinstance(value, list) else ()
 
         def strings(key):
             value = raw.get(key)
@@ -805,7 +865,7 @@ class PluginRegistry:
         network = permissions.get("network")
         update = raw.get("update")
         return Manifest(
-            manifest=raw["manifest"], id=pluginId,
+            manifest=int(raw["manifest"]), id=pluginId,
             version=string("version", ""), name=text("name", pluginId),
             author=string("author", ""), license=string("license", ""),
             min_autona=string("min_autona", ""), protocol=ints("protocol"),
@@ -838,7 +898,8 @@ class PluginRegistry:
             return DescribeResult(None, failure=DescribeFailure.TIMED_OUT)
         if run.exit_code != 0:
             return DescribeResult(None, failure=DescribeFailure.NONZERO_EXIT,
-                                  detail=str(run.exit_code))
+                                  detail="no exit code" if run.exit_code is None
+                                  else f"exit code {run.exit_code}")
         if run.stdout_lines == 0:
             return DescribeResult(None, failure=DescribeFailure.NO_LINE)
         if not run.objects:
@@ -853,7 +914,7 @@ class PluginRegistry:
                 and all(_IsInt(item) for item in protocol)):
             return DescribeResult(None, failure=DescribeFailure.PROTOCOL_MISSING)
         answer = DescribeAnswer(
-            protocol=tuple(protocol),
+            protocol=tuple(int(item) for item in protocol),
             id=line.get("id") if isinstance(line.get("id"), str) else "",
             version=(line.get("version")
                      if isinstance(line.get("version"), str) else ""))
@@ -871,7 +932,12 @@ class PluginRegistry:
     # ── the scan ───────────────────────────────────────────────────────
 
     def Scan(self) -> None:
+        with self._scanLock:
+            self._ScanLocked()
+
+    def _ScanLocked(self):
         plugins: Dict[str, RegisteredPlugin] = {}
+        refused: List[Tuple[str, Tuple[ManifestProblem, ...]]] = []
         builtin = self._Builtin()
         plugins[builtin.id] = builtin
 
@@ -882,41 +948,64 @@ class PluginRegistry:
             names = []
         for name in names:
             folder = os.path.join(root, name)
-            if name.endswith(_SKIPPED_SUFFIXES) or not os.path.isdir(folder):
+            if not os.path.isdir(folder) or (
+                    name.endswith(_SKIPPED_SUFFIXES)
+                    and re.fullmatch(PLUGIN_ID_PATTERN, name[:-4])):
                 continue
             source = (self._Call(self._installSource, None, name)
                       or InstallSource("manual"))
-            raw, problem = ReadManifest(folder)
-            report = (ManifestReport(None, (problem,)) if problem
-                      else self.Check(raw, folder, source, dev=False,
-                                      hostVersion=self._hostVersion))
+            report = self._CheckFolder(folder, source, dev=False)
             if name in plugins:
+                # plugins/taguyan.vodsplit/: the built-in keeps the id.
+                refused.append((folder, self._Taken(report).problems))
                 logger.warning("Plugins: an installed folder has the built-in's id")
                 continue
             plugins[name] = self._Registered(
                 name, folder, Badge.LISTED if source.kind == "github" else Badge.MANUAL,
                 report)
 
-        folders, devPlugins, devProblems = self._ScanDev(plugins)
+        folders, active, devPlugins, devProblems = self._ScanDev(plugins)
         plugins.update(devPlugins)
+        refused += [(folder.path, devProblems[folder.id]) for folder in folders
+                    if any(p.code == ManifestCheck.ID_TAKEN
+                           for p in devProblems.get(folder.id, ()))]
         with self._lock:
             self._plugins = plugins
             self._devFolders = folders
+            self._activeDevIds = active
             self._devProblems = devProblems
+            self._refused = tuple(refused)
             live = {os.path.normcase(p.folder) for p in plugins.values()}
             self._describes = {k: v for k, v in self._describes.items()
                                if k in live}
         logger.info(f"Plugins: {len(plugins) - 1} found "
                     f"({len(devPlugins)} in dev folders)")
 
+    def _CheckFolder(self, folder, source, *, dev):
+        """ReadManifest + Check of one folder. A manifest that breaks the
+        check itself is that folder's MANIFEST_UNREADABLE, never the scan's
+        end."""
+        try:
+            raw, problem = ReadManifest(folder)
+            if problem:
+                return ManifestReport(None, (problem,))
+            return self.Check(raw, folder, source, dev=dev,
+                              hostVersion=self._hostVersion)
+        except Exception as error:
+            logger.warning(f"Plugins: a manifest broke the check: "
+                           f"{type(error).__name__}")
+            return ManifestReport(None, (_Unreadable(
+                f"the check failed: {type(error).__name__}"),))
+
     def _Builtin(self):
         version = self._Call(self._builtinVersion, "") or ""
         job = Job(id="run", title={"ja": "アーカイブ切り抜き", "en": "Archive Clipper"},
                   lane=Lane.HEAVY,
-                  # 0: no time limit (BUILTIN_VODSPLIT.timeout_seconds is
-                  # what a run uses). Manual false: it runs from its own
-                  # page, never the generic form.
-                  timeout_seconds=0, manual=False)
+                  # None: no time limit (Job.timeout_seconds is typed int in
+                  # PluginTypes; the contract patch makes it Optional).
+                  # Manual false: it runs from its own page, never the
+                  # generic form.
+                  timeout_seconds=BUILTIN_VODSPLIT.timeout_seconds, manual=False)
         manifest = Manifest(
             manifest=1, id=BUILTIN_ID, version=version,
             name={"ja": "アーカイブ切り抜き", "en": "Archive Clipper"},
@@ -927,10 +1016,28 @@ class PluginRegistry:
                                     spawn=True, autona_api="none"),
             jobs=(job,))
         folder = self.BuiltinDir()
-        size = _FolderSize(folder) if os.path.isdir(folder) else 0
         return RegisteredPlugin(id=BUILTIN_ID, folder=folder, badge=Badge.BUILTIN,
                                 report=ManifestReport(manifest, ()),
-                                state=PluginState.READY, size_bytes=size)
+                                state=PluginState.READY,
+                                size_bytes=self._Size(folder))
+
+    def _Size(self, folder):
+        """_FolderSize, kept while the folder is the same one (a swap makes
+        a new folder; a file changed deep inside is not seen until then)."""
+        try:
+            info = os.stat(folder)
+        except OSError:
+            return 0
+        key = (os.path.normcase(folder), info.st_ino, info.st_mtime_ns)
+        with self._lock:
+            size = self._sizes.get(key)
+        if size is None:
+            size = _FolderSize(folder)
+            with self._lock:
+                self._sizes = {k: v for k, v in self._sizes.items()
+                               if k[0] != key[0]}
+                self._sizes[key] = size
+        return size
 
     def _Registered(self, pluginId, folder, badge, report):
         manifest = report.manifest
@@ -939,7 +1046,7 @@ class PluginRegistry:
             and problem.path == "icon" for problem in report.problems)
         # A dev folder is a source tree (a venv, node_modules): not walked,
         # its size is nobody's install.
-        size = 0 if badge == Badge.DEV else _FolderSize(folder)
+        size = 0 if badge == Badge.DEV else self._Size(folder)
         return RegisteredPlugin(id=pluginId, folder=folder, badge=badge,
                                 report=report, state=PluginState.READY,
                                 size_bytes=size, has_icon=hasIcon)
@@ -950,51 +1057,87 @@ class PluginRegistry:
             ManifestProblem(ManifestCheck.ID_TAKEN, ProblemScope.PLUGIN, "id"),))
 
     def _ReadDevList(self):
-        """(toggle, [paths]) of dev.json; (False, []) when it is not there
-        or not readable."""
+        """(toggle, [paths], broken) of dev.json; (False, [], False) when it
+        is not there, (False, [], True) when it is but cannot be read as
+        one (it is moved aside before the next write, never overwritten)."""
         try:
             with open(self._DevListPath(), encoding="utf-8-sig") as file:
                 data = json.load(file)
-        except (OSError, ValueError):
-            return False, []
+        except FileNotFoundError:
+            return False, [], False
+        except (OSError, ValueError, RecursionError):
+            return False, [], True
         if not isinstance(data, dict):
-            return False, []
+            return False, [], True
         folders = data.get("folders")
         folders = [p for p in folders if isinstance(p, str)] if isinstance(folders, list) else []
-        return data.get("enabled") is True, folders
+        return data.get("enabled") is True, folders, False
 
     def _WriteDevList(self, enabled, folders):
+        """Write dev.json (a broken one moved aside first). OSError when it
+        cannot be written; the temporary file is not left behind."""
         path = self._DevListPath()
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        if self._ReadDevList()[2]:
+            aside = f"{path}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}.bak"
+            os.replace(path, aside)
+            logger.warning("Plugins: dev.json was unreadable; moved aside")
         temp = path + ".tmp"
-        with open(temp, "w", encoding="utf-8") as file:
-            json.dump({"enabled": bool(enabled), "folders": list(folders)},
-                      file, ensure_ascii=False, indent=2)
-        os.replace(temp, path)
+        try:
+            with open(temp, "w", encoding="utf-8") as file:
+                json.dump({"enabled": bool(enabled), "folders": list(folders)},
+                          file, ensure_ascii=False, indent=2)
+            delay = _REPLACE_BACKOFF
+            for attempt in range(_REPLACE_ATTEMPTS):
+                try:
+                    os.replace(temp, path)
+                    return
+                except OSError:  # a reader holding it open on Windows
+                    if attempt == _REPLACE_ATTEMPTS - 1:
+                        raise
+                    time.sleep(delay)
+                    delay *= 2
+        finally:
+            if os.path.exists(temp):
+                try:
+                    os.remove(temp)
+                except OSError:
+                    pass
 
     def _DevPaths(self):
-        """[(path, from_env)] of the active dev folders, each once."""
-        enabled, listed = self._ReadDevList()
+        """[(path, from_env, active)] of every dev folder, each once:
+        dev.json's (active while its toggle is on), then AUTONA_PLUGIN_DEV's
+        (always active)."""
+        enabled, listed, _broken = self._ReadDevList()
         env = self._Call(self._environ, {}) or {}
         fromEnv = [part.strip() for part in str(env.get(DEV_ENV, "")).split(";")
                    if part.strip()]
         seen, paths = set(), []
-        for path, isEnv in ([(p, False) for p in (listed if enabled else [])]
+        for path, isEnv in ([(p, False) for p in listed]
                             + [(p, True) for p in fromEnv]):
             folderId = DevFolderId(path)
             if folderId not in seen:
                 seen.add(folderId)
-                paths.append((os.path.abspath(path), isEnv))
+                paths.append((os.path.abspath(path), isEnv, isEnv or enabled))
         return paths
 
     def _ScanDev(self, taken):
-        folders, plugins, problems = [], {}, {}
-        for path, fromEnv in self._DevPaths():
+        folders, active, plugins, problems = [], set(), {}, {}
+        for path, fromEnv, isActive in self._DevPaths():
             folderId = DevFolderId(path)
-            raw, problem = ReadManifest(path)
-            report = (ManifestReport(None, (problem,)) if problem
-                      else self.Check(raw, path, InstallSource("dev"), dev=True,
-                                      hostVersion=self._hostVersion))
+            if not isActive:
+                # Listed while the toggle is off: named, not checked.
+                try:
+                    raw, _problem = ReadManifest(path)
+                except Exception:
+                    raw = None
+                pluginId = raw.get("id") if isinstance(raw, dict) else None
+                folders.append(DevFolder(folderId, path, pluginId
+                                         if isinstance(pluginId, str) else None,
+                                         fromEnv))
+                continue
+            active.add(folderId)
+            report = self._CheckFolder(path, InstallSource("dev"), dev=True)
             pluginId = (report.manifest.id if report.manifest
                         else os.path.basename(os.path.normpath(path)))
             folders.append(DevFolder(folderId, path,
@@ -1006,14 +1149,14 @@ class PluginRegistry:
                 continue
             problems[folderId] = report.problems
             plugins[pluginId] = self._Registered(pluginId, path, Badge.DEV, report)
-        return tuple(folders), plugins, problems
+        return tuple(folders), frozenset(active), plugins, problems
 
     # ── reading ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _Call(fn, default, *args):
+    def _Call(fn, default, *args, **kwargs):
         try:
-            return fn(*args)
+            return fn(*args, **kwargs)
         except Exception as error:  # an injected part's failure is not ours
             logger.warning(f"Plugins: a callable failed: {type(error).__name__}")
             return default
@@ -1043,7 +1186,7 @@ class PluginRegistry:
         if self._Call(self._isRunning, False, plugin.id):
             applies.add(PluginState.RUNNING)
         if not builtin and manifest is not None and self._Call(
-                self._settingsMissing, (), plugin.id, manifest, dev):
+                self._settingsMissing, (), plugin.id, manifest, dev=dev):
             applies.add(PluginState.NEEDS_SETTINGS)
         state = next((s for s in STATE_PRECEDENCE if s in applies),
                      PluginState.READY)
@@ -1093,59 +1236,110 @@ class PluginRegistry:
     # ── dev folders ────────────────────────────────────────────────────
 
     def DevFolders(self) -> Sequence[DevFolder]:
+        """Every dev folder: dev.json's (also while the toggle is off;
+        DevFolderActive says whether it is scanned), then AUTONA_PLUGIN_DEV's."""
         with self._lock:
             return self._devFolders
+
+    def DevFolderActive(self, folderId: str) -> bool:
+        """Whether the dev folder is scanned (dev.json's: the toggle is on;
+        AUTONA_PLUGIN_DEV's: always)."""
+        with self._lock:
+            return folderId in self._activeDevIds
 
     def DevFolderProblems(self, folderId: str) -> Tuple[ManifestProblem, ...]:
         """A dev folder's manifest problems (ID_TAKEN when refused)."""
         with self._lock:
             return self._devProblems.get(folderId, ())
 
+    def RefusedFolders(self) -> Tuple[Tuple[str, Tuple[ManifestProblem, ...]], ...]:
+        """(folder, problems) of every folder whose id another plugin owns
+        (ID_TAKEN): an installed ``plugins/taguyan.vodsplit/``, a dev folder.
+        Not list rows -- a row's id names one plugin -- so the page shows
+        them beside the list."""
+        with self._lock:
+            return self._refused
+
     def DevMode(self) -> bool:
         return self._ReadDevList()[0]
 
-    def SetDevMode(self, on: bool) -> None:
-        with self._devLock:
-            _enabled, folders = self._ReadDevList()
-            self._WriteDevList(on, folders)
+    def SetDevMode(self, on: bool) -> Optional[Refused]:
+        """The developer toggle (dev.json). UNAVAILABLE when dev.json cannot
+        be written."""
+        try:
+            with self._devLock:
+                _enabled, folders, _broken = self._ReadDevList()
+                self._WriteDevList(on, folders)
+        except OSError as error:
+            return self._WriteRefused(error)
         self.Scan()
+        return None
+
+    @staticmethod
+    def _WriteRefused(error):
+        logger.warning(f"Plugins: dev.json not written: {type(error).__name__}")
+        return Refused(StartRefusal.UNAVAILABLE, detail="dev.json not written")
+
+    def _InstalledFolder(self, path):
+        """Whether ``path`` is (in) plugins/ or the built-in's folder, or an
+        installed plugin's folder."""
+        normal = os.path.normcase(path)
+        for root in (self.PluginsRoot(), self.BuiltinDir()):
+            root = os.path.normcase(os.path.abspath(root))
+            if normal == root or normal.startswith(root + os.sep):
+                return True
+        with self._lock:
+            return any(os.path.normcase(p.folder) == normal
+                       for p in self._plugins.values() if p.badge != Badge.DEV)
 
     def AddDevFolder(self, path: str):
-        """Add a dev folder to dev.json (INVALID_REQUEST when it is not a
-        folder; ID_TAKEN when an installed, built-in or other dev plugin
-        has its id). Adding one listed already returns it."""
+        """Add a dev folder to dev.json. INVALID_REQUEST when it is not a
+        folder or is an installed one (plugins/, the built-in's); ID_TAKEN
+        when an installed, built-in or other dev plugin has its id;
+        UNAVAILABLE when dev.json cannot be written. Adding one listed
+        already returns it."""
         path = os.path.abspath(path)
         if not os.path.isdir(path):
             return Refused(StartRefusal.INVALID_REQUEST, detail="not a folder")
+        if self._InstalledFolder(path):
+            return Refused(StartRefusal.INVALID_REQUEST,
+                           detail="an installed plugin's folder")
         folderId = DevFolderId(path)
         raw, problem = ReadManifest(path)
         pluginId = raw.get("id") if problem is None and isinstance(raw, dict) else None
-        with self._devLock:
-            enabled, folders = self._ReadDevList()
-            if any(DevFolderId(p) == folderId for p in folders):
-                return next((f for f in self.DevFolders() if f.id == folderId),
-                            DevFolder(folderId, path))
-            if isinstance(pluginId, str):
-                with self._lock:
-                    owner = self._plugins.get(pluginId)
-                if owner is not None and (os.path.normcase(owner.folder)
-                                          != os.path.normcase(path)):
-                    return Refused(StartRefusal.ID_TAKEN, detail=pluginId)
-            self._WriteDevList(enabled, folders + [path])
+        try:
+            with self._devLock:
+                enabled, folders, _broken = self._ReadDevList()
+                if any(DevFolderId(p) == folderId for p in folders):
+                    return next((f for f in self.DevFolders() if f.id == folderId),
+                                DevFolder(folderId, path))
+                if isinstance(pluginId, str):
+                    with self._lock:
+                        owner = self._plugins.get(pluginId)
+                    if owner is not None and (os.path.normcase(owner.folder)
+                                              != os.path.normcase(path)):
+                        return Refused(StartRefusal.ID_TAKEN, detail=pluginId)
+                self._WriteDevList(enabled, folders + [path])
+        except OSError as error:
+            return self._WriteRefused(error)
         self.Scan()
         return next((f for f in self.DevFolders() if f.id == folderId),
                     DevFolder(folderId, path,
                               pluginId if isinstance(pluginId, str) else None))
 
-    def RemoveDevFolder(self, folderId: str) -> bool:
+    def RemoveDevFolder(self, folderId: str):
         """Remove dev.json's folder ``folderId`` (the folder stays; an
-        AUTONA_PLUGIN_DEV one cannot be removed here)."""
-        with self._devLock:
-            enabled, folders = self._ReadDevList()
-            kept = [p for p in folders if DevFolderId(p) != folderId]
-            if len(kept) == len(folders):
-                return False
-            self._WriteDevList(enabled, kept)
+        AUTONA_PLUGIN_DEV one cannot be removed here): True / False, or
+        UNAVAILABLE when dev.json cannot be written."""
+        try:
+            with self._devLock:
+                enabled, folders, _broken = self._ReadDevList()
+                kept = [p for p in folders if DevFolderId(p) != folderId]
+                if len(kept) == len(folders):
+                    return False
+                self._WriteDevList(enabled, kept)
+        except OSError as error:
+            return self._WriteRefused(error)
         self.Scan()
         return True
 
@@ -1162,7 +1356,8 @@ class PluginRegistry:
                 or not PluginUsable(plugin.report) or self._describe is None):
             return None
         manifest = plugin.report.manifest
-        run = self._Call(self._describe, None, plugin.folder, manifest.entry, True)
+        run = self._Call(self._describe, None, plugin.folder, manifest.entry,
+                         dev=True)
         result = (self.JudgeDescribe(run, manifest) if isinstance(run, DescribeRun)
                   else DescribeResult(None, failure=DescribeFailure.LAUNCH_FAILED))
         with self._lock:

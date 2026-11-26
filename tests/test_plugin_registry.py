@@ -238,14 +238,43 @@ def test_a_broken_manifest_gets_its_code_in_its_scope(tmp_path, name, code,
         assert PluginUsable(report) and len(UsableJobs(report)) == 2
 
 
-def test_every_code_the_registry_owns_is_reached():
-    reached = {case[1] for case in CASES} | {
-        # Their own tests below: they need folders the table cannot make.
-        "manifest_unreadable", "id_folder_mismatch", "id_reserved",
-        "id_taken", "entry_outside", "entry_missing", "icon_invalid"}
+def test_every_code_the_registry_owns_is_reached(tmp_path):
+    """Every code is really produced: the table's, and the ones that need
+    folders the table cannot make."""
+    _winapi = pytest.importorskip("_winapi")
+    reached = set()
+
+    def run(report):
+        reached.update(p.code.value for p in report.problems)
+
+    for index, (_name, _code, _job, change) in enumerate(CASES):
+        manifest = _example()
+        change(manifest)
+        run(_check(tmp_path / f"case{index}", manifest))
+    run(T.ManifestReport(None, (ReadManifest(str(tmp_path / "nowhere"))[1],)))
+    run(_check(tmp_path / "mismatch", _example(), name="other.name"))
+    run(_check(tmp_path / "reserved", _example(), source=T.InstallSource("manual")))
+    run(_check(tmp_path / "missing", _example(), exe=False))
+    bad = _example()
+    bad["icon"] = "icon.jpg"
+    run(_check(tmp_path / "icon", bad))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "webhook.exe").write_bytes(b"MZ")
+    folder = _plugin(tmp_path / "junction" / "app" / "plugins", _example(), exe=False)
+    _winapi.CreateJunction(str(outside), str(folder / "bin"))
+    run(_registry(tmp_path / "junction").Check(_example(), str(folder), OFFICIAL,
+                                               dev=False, hostVersion=HOST))
+    taken = tmp_path / "taken"
+    _plugin(_app(taken), _example())
+    clash = _dev(taken, "clash", "taguyan.webhook")
+    registry = _registry(taken, environ=lambda: {DEV_ENV: str(clash)})
+    registry.Scan()
+    run(T.ManifestReport(None, registry.DevFolderProblems(DevFolderId(str(clash)))))
+
     owned = {row["code"] for row in CONTRACT["manifest_checks"]["codes"]
              if row["owner"].startswith("PluginRegistry.")}
-    assert owned == reached
+    assert reached == owned
     assert owned == {member.value for member in T.ManifestCheck}
 
 
@@ -647,6 +676,12 @@ def test_the_state_is_the_first_that_applies(tmp_path, conditions, state):
     if "incompatible" in conditions:
         manifest["protocol"] = [2]
     _plugin(_app(tmp_path), manifest)
+
+    # PluginSettings.Missing's shape: dev is keyword-only.
+    def missing(pluginId, manifest, *, dev):
+        return (("webhook_url",) if "missing" in conditions and dev is False
+                and isinstance(manifest, T.Manifest) else ())
+
     registry = _registry(
         tmp_path,
         blockedBy=lambda pid, version: {"ja": "止めた"}
@@ -654,8 +689,7 @@ def test_the_state_is_the_first_that_applies(tmp_path, conditions, state):
         else None,
         isEnabled=lambda _id: "disabled" not in conditions,
         isRunning=lambda _id: "running" in conditions,
-        settingsMissing=lambda _id, _m, dev: ("webhook_url",)
-        if "missing" in conditions and dev is False else ())
+        settingsMissing=missing)
     registry.Scan()
     plugin = registry.Get("taguyan.webhook")
     assert plugin.state == T.PluginState(state)
@@ -724,7 +758,8 @@ def test_reload_describes_a_dev_plugin(tmp_path):
     calls = []
     answers = {"version": "1.0.0"}
 
-    def describe(pluginDir, entry, dev):
+    # PluginRunner.Describe's shape: dev is keyword-only.
+    def describe(pluginDir, entry, *, dev):
         calls.append((pluginDir, tuple(entry), dev))
         return T.DescribeRun(launched=True, exit_code=0, stdout_lines=1, objects=(
             dict(ANSWER, id="me.tool", version=answers["version"]),))
@@ -745,3 +780,273 @@ def test_reload_describes_a_dev_plugin(tmp_path):
     assert result.failure == T.DescribeFailure.VERSION_MISMATCH
     assert registry.Get("me.tool").state == T.PluginState.INCOMPATIBLE
     assert registry.Reload("nobody") is None
+
+
+# ── review follow-ups ───────────────────────────────────────────────────
+
+def test_the_injected_callables_have_the_protocols_shape():
+    import inspect
+    describe = inspect.signature(T.PluginRunner.Describe).parameters
+    missing = inspect.signature(T.PluginSettings.Missing).parameters
+    assert describe["dev"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert missing["dev"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+@pytest.mark.parametrize("change", [
+    # a type that is not hashable, on a job with a hook (the default check)
+    lambda m: _job(m, "post_match")["params"].append(
+        {"key": "x", "type": ["text"], "label": "x", "required": True}),
+    lambda m: _job(m, "post_match")["params"].append(
+        {"key": "y", "type": {"a": 1}, "label": "y", "required": True}),
+    # past int()'s digit limit
+    lambda m: m.update(min_autona="1" * 5000 + ".0.0"),
+    lambda m: m.update(version="9" * 5000 + ".0.0"),
+], ids=["list type", "dict type", "huge min_autona", "huge version"])
+def test_an_odd_manifest_is_a_problem_not_an_exception(tmp_path, change):
+    manifest = _example()
+    change(manifest)
+    report = _check(tmp_path, manifest)
+    assert {p.code for p in report.problems} <= {
+        T.ManifestCheck.INVALID_FIELD, T.ManifestCheck.INVALID_JOB_FIELD}
+    assert report.problems
+
+
+def test_a_manifest_nested_too_deep_is_unreadable(tmp_path):
+    folder = tmp_path / "a.b"
+    folder.mkdir()
+    (folder / "plugin.json").write_text("[" * 100000 + "]" * 100000,
+                                        encoding="utf-8")
+    raw, problem = ReadManifest(str(folder))
+    assert raw is None and problem.code == T.ManifestCheck.MANIFEST_UNREADABLE
+
+
+def test_a_check_that_breaks_takes_down_its_folder_only(tmp_path, monkeypatch):
+    _plugin(_app(tmp_path), _example())
+    other = _example()
+    other["id"] = "example.fine"
+    _plugin(_app(tmp_path), other)
+    registry = _registry(tmp_path, installSource=lambda _id: OFFICIAL)
+    real = registry.Check
+
+    def check(raw, folder, source, *, dev, hostVersion):
+        if raw.get("id") == "taguyan.webhook":
+            raise TypeError("a bug the manifest found")
+        return real(raw, folder, source, dev=dev, hostVersion=hostVersion)
+
+    monkeypatch.setattr(registry, "Check", check)
+    registry.Scan()
+    states = {e.id: e.state for e in registry.Entries()}
+    assert states["example.fine"] == T.PluginState.READY
+    assert states["taguyan.webhook"] == T.PluginState.INCOMPATIBLE
+    broken = registry.Get("taguyan.webhook").report
+    assert broken.manifest is None
+    assert [(p.code, p.scope) for p in broken.problems] == [
+        (T.ManifestCheck.MANIFEST_UNREADABLE, T.ProblemScope.PLUGIN)]
+
+
+@pytest.mark.parametrize("change, path", [
+    (lambda m: m.update(id="taguyan.webhook\n"), "id"),
+    (lambda m: m.update(version="1.0.0\n"), "version"),
+    (lambda m: m.update(min_autona="2.6.0\n"), "min_autona"),
+    (lambda m: m.update(homepage="https://example.com\n"), "homepage"),
+    (lambda m: m["settings"][1].update(key="mention\n"), "settings[1].key"),
+], ids=["id", "version", "min_autona", "homepage", "key"])
+def test_a_trailing_newline_does_not_pass_a_pattern(tmp_path, change, path):
+    manifest = _example()
+    change(manifest)
+    report = _check(tmp_path, manifest, name="taguyan.webhook")
+    assert (T.ManifestCheck.INVALID_FIELD, path) in {
+        (p.code, p.path) for p in report.problems}
+
+
+@pytest.mark.parametrize("pluginId, refused", [
+    ("con.tool", True), ("me.nul", True), ("aux.x", True), ("prn.y", True),
+    ("com1.x", True), ("me.lpt9", True), ("cons.tool", False),
+    ("me.com10", False), ("me.console", False),
+])
+def test_a_windows_device_name_is_no_id(tmp_path, pluginId, refused):
+    manifest = _example()
+    manifest["id"] = pluginId
+    report = _check(tmp_path, manifest, source=T.InstallSource("manual"))
+    assert (("invalid_field", "plugin", None) in _found(report)) is refused
+    assert (report.manifest is None) is refused
+
+
+def test_integral_floats_are_integers(tmp_path):
+    manifest = _example()
+    manifest["manifest"] = 1.0
+    manifest["protocol"] = [1.0]
+    job = _job(manifest, "post_image")
+    job["timeout_seconds"] = 60.0
+    job["memory_mb"] = 256.0
+    job["params"][1]["max_length"] = 1500.0
+    report = _check(tmp_path, manifest)
+    assert report.problems == ()
+    built = report.manifest
+    assert (built.manifest, built.protocol) == (1, (1,))
+    assert type(built.manifest) is int and type(built.protocol[0]) is int
+    first = built.jobs[0]
+    assert (first.timeout_seconds, first.memory_mb) == (60, 256)
+    assert type(first.timeout_seconds) is int and type(first.memory_mb) is int
+    assert type(first.params[1].max_length) is int
+    # 1.5 is not one.
+    job["timeout_seconds"] = 60.5
+    assert ("invalid_job_field", "job", "post_image") in _found(
+        _check(tmp_path / "half", manifest))
+
+
+def test_a_secrets_default_is_never_kept(tmp_path):
+    manifest = _example()
+    manifest["settings"][0]["default"] = "https://leaked.example"
+    report = _check(tmp_path, manifest)
+    assert report.manifest.settings[0].default is None
+
+
+def test_bad_options_are_reported_once(tmp_path):
+    manifest = _example()
+    manifest["settings"][1]["options"] = "none"
+    report = _check(tmp_path, manifest)
+    assert [p.path for p in report.problems] == ["settings[1].options"]
+    manifest = _example()
+    manifest["settings"].append({"key": "f", "type": "file", "label": "f",
+                                 "extensions": "png"})
+    report = _check(tmp_path / "file", manifest)
+    assert [p.path for p in report.problems] == ["settings[2].extensions"]
+
+
+def test_a_describe_without_an_exit_code_says_so(tmp_path):
+    result = _registry(tmp_path).JudgeDescribe(
+        T.DescribeRun(launched=True, exit_code=None), _manifest(tmp_path))
+    assert (result.failure, result.detail) == (T.DescribeFailure.NONZERO_EXIT,
+                                               "no exit code")
+
+
+def test_only_a_swaps_leftovers_are_skipped(tmp_path):
+    plugins = _app(tmp_path)
+    _plugin(plugins, _example(), name="taguyan.webhook.new")
+    odd = _example()
+    odd["id"] = "foo.new"          # a plugin whose id ends in .new
+    _plugin(plugins, odd)
+    registry = _registry(tmp_path, installSource=lambda _id: None)
+    registry.Scan()
+    assert [e.id for e in registry.Entries()] == [BUILTIN_ID, "foo.new"]
+
+
+def test_the_builtin_has_no_time_limit(tmp_path):
+    registry = _registry(tmp_path)
+    registry.Scan()
+    assert registry.Get(BUILTIN_ID).report.manifest.jobs[0].timeout_seconds is None
+
+
+def test_a_listed_dev_folder_shows_while_the_toggle_is_off(tmp_path):
+    folder = _dev(tmp_path, "src", "me.tool")
+    registry = _registry(tmp_path)
+    added = registry.AddDevFolder(str(folder))
+    assert [(f.id, f.plugin_id, f.from_env) for f in registry.DevFolders()] == [
+        (added.id, "me.tool", False)]
+    assert registry.DevFolderActive(added.id) is False
+    assert "me.tool" not in [e.id for e in registry.Entries()]
+    registry.SetDevMode(True)
+    assert registry.DevFolderActive(added.id) is True
+    assert "me.tool" in [e.id for e in registry.Entries()]
+
+
+def test_a_dev_json_that_cannot_be_written_is_refused(tmp_path, monkeypatch):
+    from src.core import PluginRegistry as module
+    folder = _dev(tmp_path, "src", "me.tool")
+    registry = _registry(tmp_path)
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    calls = []
+
+    def replace(source, target):
+        calls.append(target)
+        raise PermissionError("held open")
+
+    monkeypatch.setattr(module.os, "replace", replace)
+    refused = registry.AddDevFolder(str(folder))
+    assert refused == T.Refused(T.StartRefusal.UNAVAILABLE,
+                                detail="dev.json not written")
+    assert len(calls) == 4                              # retried
+    assert registry.SetDevMode(True).reason == T.StartRefusal.UNAVAILABLE
+    assert list((tmp_path / "ud" / "plugins").iterdir()) == []   # no .tmp
+    monkeypatch.undo()
+    assert registry.SetDevMode(True) is None
+
+
+def test_a_dev_json_replace_that_fails_for_a_moment_is_retried(tmp_path,
+                                                                monkeypatch):
+    from src.core import PluginRegistry as module
+    real = module.os.replace
+    failures = [PermissionError("held"), PermissionError("held")]
+
+    def replace(source, target):
+        if failures:
+            raise failures.pop()
+        return real(source, target)
+
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(module.os, "replace", replace)
+    registry = _registry(tmp_path)
+    assert registry.SetDevMode(True) is None
+    assert registry.DevMode() is True
+
+
+def test_a_broken_dev_json_is_moved_aside_before_a_write(tmp_path):
+    folder = _dev(tmp_path, "src", "me.tool")
+    listPath = tmp_path / "ud" / "plugins" / "dev.json"
+    listPath.parent.mkdir(parents=True)
+    listPath.write_text("{broken", encoding="utf-8")
+    registry = _registry(tmp_path)
+    registry.Scan()                                  # reading leaves it
+    assert listPath.read_text(encoding="utf-8") == "{broken"
+    registry.AddDevFolder(str(folder))
+    aside = list(listPath.parent.glob("dev.json.unreadable-*.bak"))
+    assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == "{broken"
+    assert json.loads(listPath.read_text(encoding="utf-8"))["folders"] == [str(folder)]
+
+
+def test_an_installed_folder_is_no_dev_folder(tmp_path):
+    folder = _plugin(_app(tmp_path), _example())
+    worker = tmp_path / "app" / ArchiveWorker.WORKER_DIR
+    worker.mkdir()
+    registry = _registry(tmp_path)
+    registry.Scan()
+    for path in (folder, worker, _app(tmp_path)):
+        refused = registry.AddDevFolder(str(path))
+        assert refused.reason == T.StartRefusal.INVALID_REQUEST, path
+
+
+def test_an_installed_folder_with_the_builtins_id_is_shown_refused(tmp_path):
+    vodsplit = _example()
+    vodsplit["id"] = BUILTIN_ID
+    folder = _plugin(_app(tmp_path), vodsplit)
+    registry = _registry(tmp_path)
+    registry.Scan()
+    assert [e.badge for e in registry.Entries()] == [T.Badge.BUILTIN]
+    assert [(path, {p.code for p in problems})
+            for path, problems in registry.RefusedFolders()] == [
+        (str(folder), {T.ManifestCheck.ID_TAKEN})]
+
+
+def test_the_size_skips_junctions_and_is_kept(tmp_path, monkeypatch):
+    _winapi = pytest.importorskip("_winapi")
+    from src.core import PluginRegistry as module
+    folder = _plugin(_app(tmp_path), _example())
+    big = tmp_path / "big"
+    big.mkdir()
+    (big / "huge.bin").write_bytes(b"x" * 100000)
+    _winapi.CreateJunction(str(big), str(folder / "linked"))
+    registry = _registry(tmp_path)
+    registry.Scan()
+    size = registry.Get("taguyan.webhook").size_bytes
+    assert 0 < size < 100000
+    walks = []
+    real = module._FolderSize
+    monkeypatch.setattr(module, "_FolderSize",
+                        lambda path: walks.append(path) or real(path))
+    registry.Scan()
+    assert walks == []                               # the same folders: kept
+    (folder / "new.bin").write_bytes(b"y" * 10)
+    registry.Scan()
+    assert walks == [str(folder)]
+    assert registry.Get("taguyan.webhook").size_bytes == size + 10
