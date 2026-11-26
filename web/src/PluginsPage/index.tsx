@@ -18,6 +18,7 @@ import {PluginListItem} from "./pluginTypes";
 import {pluginText, sizeLabel, versionLabel} from "./pluginText";
 import PluginDetailView from "./PluginDetailView";
 import DevSection from "./DevSection";
+import InstallSection from "./InstallSection";
 
 // The generic page "Plugins" (ADR-009 D4): the list of what is installed and,
 // for the one chosen, its settings, jobs, runs, logs and artifacts. The list
@@ -114,13 +115,23 @@ function PluginsContent({api}: {api: PluginsApi}) {
                         </Box>
                     ))}
                 </Stack>
+                {shell ? (
+                    <InstallSection api={api} language={language}
+                                    onChanged={read} onError={onError}
+                                    onDone={(text) => showSnackbar(
+                                        text, "success")}/>
+                ) : null}
                 {access === "elsewhere" ? (
                     <Note>{i18n.t("plugins_browser_note")}</Note>
                 ) : null}
             </CardFrame>
             {shell && selected ? (
                 <PluginDetailView api={api} id={selected} language={language}
-                                  onChanged={read} onError={onError}/>
+                                  onChanged={read} onError={onError}
+                                  onRemoved={() => {
+                                      setSelected(null);
+                                      read();
+                                  }}/>
             ) : null}
             {shell ? (
                 <DevSection api={api} onChanged={read} onError={onError}/>

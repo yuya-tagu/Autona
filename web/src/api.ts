@@ -102,6 +102,17 @@ export async function apiPost(path: string, body?: unknown, opts?: ApiOptions): 
     return send("POST", path, body, opts);
 }
 
+// A raw body (a plugin zip's bytes, not multipart): a Blob / File carries its
+// own Content-Length, which the host requires.
+export async function apiPostBytes(path: string, body: Blob, opts?: ApiOptions): Promise<string> {
+    const resp = await request(path, {
+        method: "POST",
+        headers: {"content-type": body.type || "application/octet-stream"},
+        body,
+    }, opts);
+    return resp.text();
+}
+
 export async function apiPatch(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
     return send("PATCH", path, body, opts);
 }

@@ -57,16 +57,22 @@ still growing is cut there). A reveal is for a file / json artifact,
 checked twice (the same path both times).
 
 After a registry change succeeds (a dev plugin's reload, the developer
-toggle, a dev folder added / removed, a removal) the handler calls
+toggle, a dev folder added / removed) the handler calls
 ``PluginHooks.Refresh()`` (outside every lock; skipped headless). A
-removal does not call ``PluginHooks.Forget(REMOVED)``: that is
-PluginInstaller.Remove's, before it removes the user_data folder. The
-removal and a reload's describe run on the request's thread (I4 decides
-whether the removal becomes a job).
+reload's describe runs on the request's thread.
 
-Routes whose part is not in the contract yet (the installs, the listing,
-the update check, the enable toggle, the removal's sizes) answer 503
-``unavailable``: their stage's wiring gives them a part (ADR-009 D10).
+The installs, the enable and the removal (P5a) are PluginInstalls': an
+upload is read on the request's thread (its Content-Length required, at
+most ZIP_MAX_BYTES, both refused unread: write_op BODY_NONE, the
+upload_id cut in the log); an install's prepare and commit and a removal
+are its jobs, which scan the registry and refresh the hooks themselves
+(202, the page polls GET install / GET removal). An install's or a
+removal's failure is its ``error`` {reason, code, problems, detail}
+(contract_1.json install.errors), not a refusal of the GET.
+
+Routes whose part is not in the contract yet (the listing, the update
+check) answer 503 ``unavailable``: their stage's wiring gives them a part
+(ADR-009 D10).
 
 No Qt; nothing is made, read or written on import (pitfalls #1).
 """
@@ -86,15 +92,17 @@ from werkzeug.exceptions import HTTPException
 from .AutonaApiV1 import (BODY_NONE, CONFLICT, INVALID_ARGUMENT, NOT_FOUND,
                           UNAVAILABLE, ApiError, api_handler, write_op)
 from .core.PluginInputs import ARCHIVE_JOB_ID_PATTERN
+from .core.PluginInstalls import PluginInstallsError
 from .core.PluginJobs import RecordJson
 from .core.PluginSettings import CheckFieldValue
 from .core.PluginTypes import (
     ACTION_FILLS, CONTEXT_ONLY_TYPES, DEV_FOLDER_ID_PATTERN, HOOK_KEY_PATTERN,
     ICON_MAX_BYTES, IMAGE_ARTIFACT_MAX_BYTES, MANUAL_PICK_TYPES,
     PLUGIN_ID_PATTERN, RUN_ID_PATTERN, SOURCE_FIELD_TYPES,
-    TEXT_ARTIFACT_MAX_BYTES, VALUE_FIELD_TYPES, ActionTarget, ArtifactKind,
-    Badge, FieldType, InputPick, PluginState, ProblemScope, Refused,
-    RunRecord, StartRefusal, Trigger, TriggerKind)
+    TEXT_ARTIFACT_MAX_BYTES, VALUE_FIELD_TYPES, ZIP_MAX_BYTES, ActionTarget,
+    ArtifactKind, Badge, FieldType, InputPick, InstallState, PluginState,
+    ProblemScope, Refused, RemovalState, RunRecord, StartRefusal, Trigger,
+    TriggerKind)
 
 V1_PREFIX = "/api/v1"
 # How much of a run's worker.log the log route answers (its end).
@@ -146,7 +154,8 @@ class PluginApiDeps:
     - ``registry``: PluginRegistry (plus ``DevMode()`` for GET dev);
     - ``settings`` / ``secrets`` / ``inputs`` / ``jobs`` / ``hooks``: the
       PluginTypes Protocols' parts (``hooks`` None headless);
-    - ``installer``: PluginInstaller (its ``Remove``);
+    - ``installs``: PluginInstalls (the uploads, the installs, the
+      enable, the removals: P5a);
     - ``resolvePick(fieldType, pickId) -> Optional[str]``: the host's pick
       ids (pickFile / pickFolder) -> the absolute path, as PluginSettings';
     - ``revealFile(path) -> bool``: open the folder of a file in Explorer
@@ -159,7 +168,7 @@ class PluginApiDeps:
     inputs: Any = None
     jobs: Any = None
     hooks: Any = None
-    installer: Any = None
+    installs: Any = None
     resolvePick: Optional[Callable[[str, str], Optional[str]]] = None
     revealFile: Optional[Callable[[str], bool]] = None
     workDir: Optional[Callable[[], Optional[str]]] = None
@@ -933,16 +942,155 @@ def plugin_secret_delete(deps, plugin_id, key):
     return _Ok()
 
 
-# ── P5a: removal ────────────────────────────────────────────────────────
+# ── P5a: installs, enable, removal ──────────────────────────────────────
 
-# PluginInstaller.Remove's refusal codes (InstallError.code) -> ours.
-_REMOVE_REFUSALS = {
-    "running": StartRefusal.BUSY,
-    "in_progress": StartRefusal.BUSY,
-    "not_found": StartRefusal.NOT_FOUND,
-    "builtin": StartRefusal.INVALID_REQUEST,
-    "invalid_request": StartRefusal.INVALID_REQUEST,
-}
+def _Installs(deps, call, *args, **kwargs):
+    """A PluginInstalls call, its refusal (PluginInstallsError) as the v1
+    error."""
+    installs = _Part(deps, "installs")
+    try:
+        return getattr(installs, call)(*args, **kwargs)
+    except PluginInstallsError as error:
+        raise _Raise(error.reason, "" if error.reason is StartRefusal.BUSY
+                     else error.detail) from None
+
+
+def _FailureJson(failure):
+    if failure is None:
+        return None
+    return {"reason": StartRefusal(failure.reason).value,
+            "code": failure.code, "problems": list(failure.problems),
+            "detail": failure.detail}
+
+
+def _SheetJson(pending):
+    """ConsentSheet (routes_v1.json types): what the consent screen shows
+    (C.3 step 5). No path: the staged folder is not answered."""
+    manifest = pending.manifest
+    source = pending.source
+    installed = pending.installed
+    return {
+        "id": pending.plugin_id, "version": pending.version,
+        "name": _TextOut(manifest.name), "author": manifest.author,
+        "license": manifest.license,
+        "description": _TextOut(manifest.description),
+        "homepage": bool(manifest.homepage),
+        "source": {"kind": source.kind, "name": source.name},
+        "verified": bool(pending.verified), "sha256": pending.sha256,
+        "zip_bytes": int(pending.zip_bytes),
+        "size_bytes": int(pending.size_bytes),
+        "decision": str(pending.decision),
+        "needs_consent": bool(pending.needs_consent),
+        "installed_version": installed.version if installed else None,
+        "consent_digest": pending.consent_digest,
+        "permissions": _PermissionsJson(manifest.permissions),
+        "settings": [_FieldJson(field) for field in manifest.settings],
+        "jobs": [_JobJson(job) for job in manifest.jobs],
+    }
+
+
+def _InstallJson(status):
+    """InstallStatus (routes_v1.json types)."""
+    return {"install_id": status.install_id,
+            "state": InstallState(status.state).value,
+            "plugin_id": status.plugin_id,
+            "sheet": _SheetJson(status.pending)
+            if status.pending is not None else None,
+            "error": _FailureJson(status.failure)}
+
+
+def _RemovalJson(status):
+    """RemovalInfo (routes_v1.json types)."""
+    return {"state": RemovalState(status.state).value,
+            "error": _FailureJson(status.failure),
+            "data_bytes": int(status.data_bytes), "runs": int(status.runs),
+            "runs_bytes": int(status.runs_bytes),
+            "out_bytes": int(status.out_bytes),
+            "work_folder": status.work_folder}
+
+
+def plugin_upload_zip(deps):
+    # The zip's bytes as the body (not multipart), with a Content-Length of
+    # at most ZIP_MAX_BYTES: a missing or a larger one is refused without a
+    # byte read (write_op BODY_NONE; werkzeug drops the rest). 400, not
+    # 413: the plugin refusals' statuses (contract_1.json refusals).
+    request.max_content_length = ZIP_MAX_BYTES
+    length = request.content_length
+    if length is None:
+        raise _Invalid("Content-Length is required: send the zip's bytes "
+                       "as the body, not chunked")
+    if length > ZIP_MAX_BYTES:
+        raise _Invalid(f"a plugin zip is at most {ZIP_MAX_BYTES} bytes")
+    if length <= 0:
+        raise _Invalid("the upload is empty")
+    uploadId, expires = _Installs(deps, "ReceiveUpload", request.stream,
+                                  length)
+    return _Ok({"upload_id": uploadId, "expires_in_sec": expires},
+               status=201)
+
+
+def plugin_upload_drop(deps, upload_id):
+    # Gone all the same when imported, replaced or expired: not a 404.
+    _Installs(deps, "DropUpload", upload_id)
+    return _Ok()
+
+
+def plugin_install_create(deps):
+    body = _Body(("upload_id", "listing_id", "update"))
+    if "listing_id" in body or "update" in body:
+        # P5b / P6.
+        raise _Unavailable("not available in this version")
+    uploadId = body.get("upload_id")
+    if not isinstance(uploadId, str) or not uploadId:
+        raise _Invalid("upload_id is required")
+    status = _Installs(deps, "StartInstall", uploadId)
+    return _Ok(_InstallJson(status), status=202)
+
+
+def get_plugin_install(deps, install_id):
+    return _Ok(_InstallJson(_Installs(deps, "Status", install_id)))
+
+
+def plugin_install_consent(deps, install_id):
+    body = _Body(("consent_digest",), ("consent_digest",))
+    if not isinstance(body["consent_digest"], str):
+        raise _Invalid("consent_digest is a string")
+    status = _Installs(deps, "Consent", install_id, body["consent_digest"])
+    return _Ok(_InstallJson(status), status=202)
+
+
+def plugin_install_cancel(deps, install_id):
+    _Body(())
+    return _Ok(_InstallJson(_Installs(deps, "Cancel", install_id)))
+
+
+def _Enable(deps, plugin_id, enabled):
+    _Body(())
+    plugin = _Plugin(deps, plugin_id)
+    _Installs(deps, "SetEnabled", plugin.id, enabled)
+    return _Ok()
+
+
+def plugin_enable(deps, plugin_id):
+    return _Enable(deps, plugin_id, True)
+
+
+def plugin_disable(deps, plugin_id):
+    return _Enable(deps, plugin_id, False)
+
+
+def _RemovalId(pluginId):
+    """A removal's plugin id: its form only -- PluginInstalls answers one
+    that left the list after a failed (partial) removal, and refuses
+    NOT_FOUND only when it is gone and no removal is known."""
+    if not isinstance(pluginId, str) or not _PLUGIN_ID.fullmatch(pluginId):
+        raise _NotFound("no such plugin")
+    return pluginId
+
+
+def get_plugin_removal(deps, plugin_id):
+    return _Ok(_RemovalJson(_Installs(deps, "Removal",
+                                      _RemovalId(plugin_id))))
 
 
 def plugin_remove(deps, plugin_id):
@@ -951,26 +1099,14 @@ def plugin_remove(deps, plugin_id):
         raise _Invalid("data is a boolean")
     if body["runs"] not in REMOVE_RUNS:
         raise _Invalid("runs is " + " | ".join(REMOVE_RUNS))
-    plugin = _Plugin(deps, plugin_id)
-    if plugin.badge in (Badge.BUILTIN, Badge.DEV):
-        raise _Invalid("not an installed plugin")
-    installer = _Part(deps, "installer")
-    if _Part(deps, "jobs").Running(plugin.id):
-        raise _Raise(StartRefusal.BUSY)
-    # Not Forget(REMOVED) here: PluginInstaller.Remove's, before it removes
-    # the user_data folder.
-    try:
-        installer.Remove(plugin.id, data=body["data"], runs=body["runs"])
-    except Exception as error:
-        code = getattr(error, "code", None)
-        if not isinstance(code, str):
-            raise
-        reason = _REMOVE_REFUSALS.get(code, StartRefusal.UNAVAILABLE)
-        raise _Raise(reason, "" if reason is StartRefusal.BUSY
-                     else code) from None
-    deps.registry.Scan()
-    _Refresh(deps)
-    return _Ok()
+    pluginId = _RemovalId(plugin_id)
+    # A job (PluginInstalls): the plugin's starts held, its runs cancelled
+    # and waited for, then PluginInstaller.Remove (its Forget(REMOVED)),
+    # registry.Scan and hooks.Refresh. The page polls GET removal. The
+    # answer carries the last-known sizes.
+    status = _Installs(deps, "StartRemoval", pluginId, data=body["data"],
+                       runs=body["runs"])
+    return _Ok(_RemovalJson(status), status=202)
 
 
 # ── P7: hooks ───────────────────────────────────────────────────────────
@@ -1110,24 +1246,24 @@ ROUTES = (
      "plugin_secret_update", plugin_secret_update, _WRITE),
     ("DELETE", "/api/v1/plugins/<plugin_id>/secrets/<key>",
      "plugin_secret_delete", plugin_secret_delete, _WRITE),
-    ("POST", "/api/v1/plugins/uploads", "plugin_upload_zip", _NotYet,
-     _UPLOAD),
+    ("POST", "/api/v1/plugins/uploads", "plugin_upload_zip",
+     plugin_upload_zip, _UPLOAD),
     ("DELETE", "/api/v1/plugins/uploads/<upload_id>", "plugin_upload_drop",
-     _NotYet, _WRITE),
-    ("POST", "/api/v1/plugins/installs", "plugin_install_create", _NotYet,
-     _WRITE),
+     plugin_upload_drop, _UPLOAD),
+    ("POST", "/api/v1/plugins/installs", "plugin_install_create",
+     plugin_install_create, _WRITE),
     ("GET", "/api/v1/plugins/installs/<install_id>", "get_plugin_install",
-     _NotYet, _READ),
+     get_plugin_install, _READ),
     ("POST", "/api/v1/plugins/installs/<install_id>:consent",
-     "plugin_install_consent", _NotYet, _WRITE),
+     "plugin_install_consent", plugin_install_consent, _WRITE),
     ("POST", "/api/v1/plugins/installs/<install_id>:cancel",
-     "plugin_install_cancel", _NotYet, _WRITE),
-    ("POST", "/api/v1/plugins/<plugin_id>:enable", "plugin_enable", _NotYet,
-     _WRITE),
+     "plugin_install_cancel", plugin_install_cancel, _WRITE),
+    ("POST", "/api/v1/plugins/<plugin_id>:enable", "plugin_enable",
+     plugin_enable, _WRITE),
     ("POST", "/api/v1/plugins/<plugin_id>:disable", "plugin_disable",
-     _NotYet, _WRITE),
+     plugin_disable, _WRITE),
     ("GET", "/api/v1/plugins/<plugin_id>/removal", "get_plugin_removal",
-     _NotYet, _READ),
+     get_plugin_removal, _READ),
     ("POST", "/api/v1/plugins/<plugin_id>:remove", "plugin_remove",
      plugin_remove, _WRITE),
     ("GET", "/api/v1/plugins/listing", "get_plugin_listing", _NotYet, _READ),

@@ -9,6 +9,7 @@ tmp_path (identity cipher), so CheckFieldValue and the secret rule are the
 real ones. The access classes are the wiring's (WebAccess), not tested here.
 """
 
+import io
 import json
 import os
 from pathlib import Path
@@ -18,14 +19,17 @@ from flask import Blueprint, Flask
 from loguru import logger
 
 from src import AutonaPluginApi as api
+from src.core.PluginInstalls import PluginInstallsError
 from src.core.PluginSecrets import PluginSecrets
 from src.core.PluginSettings import PluginSettings
 from src.core.PluginTypes import (
     Action, Artifact, ArtifactKind, Badge, DescribeResult, DevFolder,
-    ErrorEvent, Field, Hook, HookDisabledReason, HookHistoryEntry,
-    HookOutcome, HookStatus, InputChoice, Job, JobState, Lane, ListEntry,
-    Manifest, ManifestCheck, ManifestProblem, ManifestReport, Option,
-    Permissions, PluginState, ProblemScope, Refused, RegisteredPlugin,
+    ZIP_MAX_BYTES, ErrorEvent, Field, Hook, HookDisabledReason,
+    HookHistoryEntry, HookOutcome, HookStatus, InputChoice, InstallDecision,
+    InstallFailure, InstallRecord, InstallSource, InstallState,
+    InstallStatus, Job, JobState, Lane, ListEntry, Manifest, ManifestCheck,
+    ManifestProblem, ManifestReport, Option, Permissions, PluginState,
+    ProblemScope, Refused, RegisteredPlugin, RemovalState, RemovalStatus,
     RunRecord, StartRefusal, Trigger, TriggerKind)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -219,21 +223,88 @@ class FakeHooks:
         return self.sample or _record(JobState.RUNNING)
 
 
-class RemoveError(Exception):
-    def __init__(self, code):
-        super().__init__(code)
-        self.code = code
+class _Pending:
+    """PluginInstaller.PendingInstall's fields the sheet reads."""
 
-
-class FakeInstaller:
     def __init__(self):
-        self.removed = []
-        self.error = None
+        self.plugin_id = PLUGIN
+        self.version = "1.0.0"
+        self.manifest = _manifest(PLUGIN)
+        self.source = InstallSource("github", repo_id=7, name="someone/tool")
+        self.verified = True
+        self.sha256 = "a" * 64
+        self.zip_bytes = 2048
+        self.size_bytes = 4096
+        self.decision = InstallDecision.UPDATE
+        self.consent_digest = "d" * 64
+        self.needs_consent = True
+        self.installed = InstallRecord(
+            source=InstallSource("github", repo_id=7), version="0.9.0",
+            sha256=None, consent_digest="c" * 64)
+        self.new_dir = "C:/staged/example.tool.new"
 
-    def Remove(self, pluginId, *, data, runs):
+
+def _InstallStatus(state, pending=..., failure=None):
+    if pending is ...:
+        pending = _Pending()
+    return InstallStatus(install_id="i1", state=state,
+                         plugin_id=pending.plugin_id if pending else None,
+                         pending=pending, failure=failure)
+
+
+class FakeInstalls:
+    """PluginInstalls: records each call; ``error`` (a PluginInstallsError)
+    is raised by the next one."""
+
+    def __init__(self):
+        self.calls = []
+        self.uploads = []
+        self.error = None
+        self.status = InstallStatus(install_id="i1",
+                                    state=InstallState.PREPARING)
+
+    def _Call(self, *call):
         if self.error is not None:
-            raise RemoveError(self.error)
-        self.removed.append((pluginId, data, runs))
+            raise self.error
+        self.calls.append(call)
+
+    def ReceiveUpload(self, stream, length):
+        self._Call("ReceiveUpload", length)
+        self.calls.pop()
+        self.uploads.append(stream.read(length))
+        return "up-1", 900
+
+    def DropUpload(self, uploadId):
+        self._Call("DropUpload", uploadId)
+        return True
+
+    def StartInstall(self, uploadId):
+        self._Call("StartInstall", uploadId)
+        return self.status
+
+    def Status(self, installId):
+        self._Call("Status", installId)
+        return self.status
+
+    def Consent(self, installId, consentDigest):
+        self._Call("Consent", installId, consentDigest)
+        return _InstallStatus(InstallState.INSTALLING)
+
+    def Cancel(self, installId):
+        self._Call("Cancel", installId)
+        return self.status
+
+    def SetEnabled(self, pluginId, enabled):
+        self._Call("SetEnabled", pluginId, enabled)
+
+    def Removal(self, pluginId):
+        self._Call("Removal", pluginId)
+        return RemovalStatus(state=RemovalState.IDLE, data_bytes=10, runs=2,
+                             runs_bytes=30, out_bytes=12, work_folder="work")
+
+    def StartRemoval(self, pluginId, *, data, runs):
+        self._Call("StartRemoval", pluginId, data, runs)
+        return RemovalStatus(state=RemovalState.REMOVING)
 
 
 @pytest.fixture
@@ -273,7 +344,7 @@ def env(tmp_path):
     deps = api.PluginApiDeps(
         registry=registry, settings=settings, secrets=secrets,
         inputs=FakeInputs(), jobs=FakeJobs(), hooks=FakeHooks(),
-        installer=FakeInstaller(), resolvePick=resolvePick,
+        installs=FakeInstalls(), resolvePick=resolvePick,
         revealFile=lambda path: revealed.append(path) or True,
         workDir=lambda: str(tmp_path / "work"))
     blueprint = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -292,7 +363,7 @@ def env(tmp_path):
     out.registry = registry
     out.jobs = deps.jobs
     out.hooks = deps.hooks
-    out.installer = deps.installer
+    out.installs = deps.installs
     out.secrets = secrets
     out.settings = settings
     out.picked = picked
@@ -366,14 +437,26 @@ def test_a_part_not_given_yet_is_unavailable(env):
 
 
 @pytest.mark.parametrize("method,path", [
-    ("POST", "/uploads"), ("DELETE", "/uploads/u1"), ("POST", "/installs"),
-    ("GET", "/installs/i1"), ("POST", "/installs/i1:consent"),
-    ("POST", "/installs/i1:cancel"), ("POST", f"/{PLUGIN}:enable"),
-    ("POST", f"/{PLUGIN}:disable"), ("GET", f"/{PLUGIN}/removal"),
     ("GET", "/listing"), ("POST", ":checkUpdates")])
 def test_the_stages_without_a_part_answer_unavailable(env, method, path):
     url = BASE + path
     _refused(env.client.open(url, method=method), 503, "unavailable")
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("POST", "/uploads", None), ("DELETE", "/uploads/u1", None),
+    ("POST", "/installs", {"upload_id": "u1"}), ("GET", "/installs/i1", None),
+    ("POST", "/installs/i1:consent", {"consent_digest": "d"}),
+    ("POST", "/installs/i1:cancel", None), ("POST", f"/{PLUGIN}:enable", None),
+    ("POST", f"/{PLUGIN}:disable", None), ("GET", f"/{PLUGIN}/removal", None),
+    ("POST", f"/{PLUGIN}:remove", {"data": True, "runs": "keep"})])
+def test_the_installs_without_their_part_answer_unavailable(env, method,
+                                                            path, body):
+    env.deps.installs = None
+    kwargs = {"json": body} if body is not None else {"data": b"zip"} \
+        if path == "/uploads" else {}
+    _refused(env.client.open(BASE + path, method=method, **kwargs), 503,
+             "unavailable")
 
 
 # ── P2: the list, the icon, the detail ──────────────────────────────────
@@ -890,42 +973,173 @@ def test_the_actions_of_a_target_carry_their_forms(env):
              "invalid_request")
 
 
-# ── P5a: removal ────────────────────────────────────────────────────────
+# ── P5a: uploads, installs, enable, removal ─────────────────────────────
 
-def test_a_plugin_is_removed(env):
+def test_a_zip_is_uploaded_as_its_bytes(env):
+    data = _data(env.client.post(f"{BASE}/uploads", data=b"PK\x03\x04zip"),
+                 201)
+    assert data == {"upload_id": "up-1", "expires_in_sec": 900}
+    assert env.installs.uploads == [b"PK\x03\x04zip"]
+
+
+def test_an_upload_without_its_length_or_over_the_limit_is_not_read(env):
+    over = _refused(env.client.post(
+        f"{BASE}/uploads", data=b"x",
+        environ_overrides={"CONTENT_LENGTH": str(ZIP_MAX_BYTES + 1)}),
+        400, "invalid_request")
+    assert str(ZIP_MAX_BYTES) in over["message"]
+    chunked = _refused(env.client.post(
+        f"{BASE}/uploads", input_stream=io.BytesIO(b"chunked"),
+        headers={"Transfer-Encoding": "chunked"}), 400, "invalid_request")
+    assert "Content-Length is required" in chunked["message"]
+    _refused(env.client.post(f"{BASE}/uploads", data=b""), 400,
+             "invalid_request")
+    assert env.installs.uploads == []
+
+
+def test_the_installs_refusals_are_the_routes(env):
+    env.installs.error = PluginInstallsError(StartRefusal.UNAVAILABLE,
+                                             "disk_full")
+    assert _refused(env.client.post(f"{BASE}/uploads", data=b"zip"), 503,
+                    "unavailable")["message"] == "disk_full"
+    env.installs.error = PluginInstallsError(StartRefusal.BUSY,
+                                             "an install is going")
+    assert _refused(env.client.post(f"{BASE}/installs",
+                                    json={"upload_id": "up-1"}),
+                    409, "busy")["message"] == ""
+    env.installs.error = PluginInstallsError(StartRefusal.NOT_FOUND,
+                                             "no such install")
+    _refused(env.client.get(f"{BASE}/installs/i1"), 404, "not_found")
+
+
+def test_an_upload_is_dropped_by_its_id(env):
+    assert _data(env.client.delete(f"{BASE}/uploads/up-1")) is None
+    assert env.installs.calls == [("DropUpload", "up-1")]
+
+
+def test_an_install_starts_from_an_upload_and_is_polled(env):
+    started = _data(env.client.post(f"{BASE}/installs",
+                                    json={"upload_id": "up-1"}), 202)
+    assert started == {"install_id": "i1", "state": "preparing",
+                       "plugin_id": None, "sheet": None, "error": None}
+    env.installs.status = _InstallStatus(InstallState.CONSENT)
+    status = _data(env.client.get(f"{BASE}/installs/i1"))
+    assert set(status) == INSTALL_KEYS
+    sheet = status["sheet"]
+    assert set(sheet) == SHEET_KEYS
+    assert sheet["id"] == PLUGIN and sheet["decision"] == "update"
+    assert sheet["source"] == {"kind": "github", "name": "someone/tool"}
+    assert sheet["installed_version"] == "0.9.0"
+    assert sheet["consent_digest"] == "d" * 64
+    assert sheet["homepage"] is True  # whether it has one, not the URL
+    assert all(set(job) == JOB_KEYS for job in sheet["jobs"])
+    # Never a path: the staged folder is not answered.
+    assert "staged" not in json.dumps(status)
+    assert env.installs.calls == [("StartInstall", "up-1"), ("Status", "i1")]
+
+
+def test_an_install_body_that_does_not_fit(env):
+    url = f"{BASE}/installs"
+    for body in ({}, {"upload_id": 3}, {"upload_id": ""}, {"x": 1}):
+        _refused(env.client.post(url, json=body), 400, "invalid_request")
+    # The listing's and the update's (P5b / P6).
+    for body in ({"listing_id": "a"}, {"update": PLUGIN}):
+        _refused(env.client.post(url, json=body), 503, "unavailable")
+    assert env.installs.calls == []
+
+
+def test_a_failed_install_says_why_without_a_path(env):
+    env.installs.status = _InstallStatus(
+        InstallState.FAILED, pending=None, failure=InstallFailure(
+            code="bad_zip", reason=StartRefusal.INCOMPATIBLE,
+            problems=("unsafe_path",), detail="the zip"))
+    status = _data(env.client.get(f"{BASE}/installs/i1"))
+    assert status["error"] == {"reason": "incompatible", "code": "bad_zip",
+                               "problems": ["unsafe_path"],
+                               "detail": "the zip"}
+    assert status["sheet"] is None
+
+
+def test_a_consent_sends_the_sheets_digest(env):
+    url = f"{BASE}/installs/i1:consent"
+    _data(env.client.post(url, json={"consent_digest": "d" * 64}), 202)
+    assert env.installs.calls == [("Consent", "i1", "d" * 64)]
+    for body in ({}, {"consent_digest": 1}, {"consent_digest": "d",
+                                             "x": 1}):
+        _refused(env.client.post(url, json=body), 400, "invalid_request")
+
+
+def test_an_install_is_cancelled(env):
+    env.installs.status = _InstallStatus(InstallState.CANCELLED)
+    assert _data(env.client.post(f"{BASE}/installs/i1:cancel"))[
+        "state"] == "cancelled"
+    assert env.installs.calls == [("Cancel", "i1")]
+
+
+def test_a_plugin_is_enabled_and_disabled(env):
+    assert _data(env.client.post(f"{BASE}/{PLUGIN}:disable")) is None
+    assert _data(env.client.post(f"{BASE}/{PLUGIN}:enable")) is None
+    assert env.installs.calls == [("SetEnabled", PLUGIN, False),
+                                  ("SetEnabled", PLUGIN, True)]
+    _refused(env.client.post(f"{BASE}/nope.x:enable"), 404, "not_found")
+    env.installs.error = PluginInstallsError(StartRefusal.INVALID_REQUEST,
+                                             "not an installed plugin")
+    _refused(env.client.post(f"{BASE}/{DEV_PLUGIN}:disable"), 400,
+             "invalid_request")
+
+
+def test_what_a_removal_would_remove(env):
+    removal = _data(env.client.get(f"{BASE}/{PLUGIN}/removal"))
+    assert removal == {"state": "idle", "error": None, "data_bytes": 10,
+                       "runs": 2, "runs_bytes": 30, "out_bytes": 12,
+                       "work_folder": "work"}
+    assert set(removal) == REMOVAL_KEYS
+
+
+def test_a_plugin_is_removed_by_a_job(env):
     url = f"{BASE}/{PLUGIN}:remove"
-    _data(env.client.post(url, json={"data": True, "runs": "keep_out"}))
-    assert env.installer.removed == [(PLUGIN, True, "keep_out")]
-    assert env.registry.scans == 1 and env.hooks.refreshes == 1
+    started = _data(env.client.post(url, json={"data": True,
+                                               "runs": "keep_out"}), 202)
+    assert started["state"] == "removing"
+    assert env.installs.calls == [("StartRemoval", PLUGIN, True,
+                                   "keep_out")]
+    # The job scans and refreshes, not the route.
+    assert env.registry.scans == 0 and env.hooks.refreshes == 0
     for body in ({"data": 1, "runs": "keep"}, {"data": True, "runs": "x"},
                  {"data": True}):
         _refused(env.client.post(url, json=body), 400, "invalid_request")
-    _refused(env.client.post(f"{BASE}/{DEV_PLUGIN}:remove",
-                             json={"data": True, "runs": "keep"}),
-             400, "invalid_request")
-
-
-def test_a_running_plugin_is_not_removed(env):
-    env.jobs.running = True
-    assert _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
-                                    json={"data": False, "runs": "keep"}),
+    env.installs.error = PluginInstallsError(StartRefusal.BUSY,
+                                             "the plugin is being changed")
+    assert _refused(env.client.post(url, json={"data": False,
+                                               "runs": "keep"}),
                     409, "busy")["message"] == ""
-    assert env.installer.removed == []
-    env.jobs.running = False
-    env.installer.error = "running"
-    assert _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
-                                    json={"data": False, "runs": "keep"}),
-                    409, "busy")["message"] == ""
-    assert env.registry.scans == 0 and env.hooks.refreshes == 0
-    env.jobs.running = False
-    env.installer.error = "remove_failed"
-    _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
-                             json={"data": False, "runs": "keep"}),
-             503, "unavailable")
-    env.installer.error = "not_found"
-    _refused(env.client.post(f"{BASE}/{PLUGIN}:remove",
+    # The form only: PluginInstalls decides whether it is known.
+    _refused(env.client.post(f"{BASE}/Not%20an%20id:remove",
                              json={"data": False, "runs": "keep"}),
              404, "not_found")
+    env.installs.error = PluginInstallsError(StartRefusal.NOT_FOUND,
+                                             "no such plugin")
+    _refused(env.client.post(f"{BASE}/nope.x:remove",
+                             json={"data": False, "runs": "keep"}),
+             404, "not_found")
+
+
+def test_a_removal_is_answered_after_the_plugin_left_the_list(env):
+    # A failed (partial) removal: the plugin is no longer listed, its
+    # removal still is (failed, and it can be asked again).
+    gone = "gone.plugin"
+    assert env.registry.Get(gone) is None
+    removal = _data(env.client.get(f"{BASE}/{gone}/removal"))
+    assert removal["state"] == "idle"
+    assert env.installs.calls == [("Removal", gone)]
+    _data(env.client.post(f"{BASE}/{gone}:remove",
+                          json={"data": True, "runs": "delete"}), 202)
+    assert env.installs.calls[-1] == ("StartRemoval", gone, True, "delete")
+    _refused(env.client.get(f"{BASE}/Not%20an%20id/removal"), 404,
+             "not_found")
+    env.installs.error = PluginInstallsError(StartRefusal.NOT_FOUND,
+                                             "no such plugin")
+    _refused(env.client.get(f"{BASE}/{gone}/removal"), 404, "not_found")
 
 
 # ── P7: hooks ───────────────────────────────────────────────────────────
@@ -995,6 +1209,15 @@ DETAIL_KEYS = LIST_KEYS | {"description", "reason", "homepage", "funding",
                            "jobs"}
 JOB_KEYS = {"id", "title", "lane", "timeout_seconds", "manual", "params",
             "actions", "hooks"}
+# routes_v1 InstallStatus / ConsentSheet / RemovalInfo.
+INSTALL_KEYS = {"install_id", "state", "plugin_id", "sheet", "error"}
+SHEET_KEYS = {"id", "version", "name", "author", "license", "description",
+              "homepage", "source", "verified", "sha256", "zip_bytes",
+              "size_bytes", "decision", "needs_consent", "installed_version",
+              "consent_digest", "permissions", "settings", "jobs"}
+FAILURE_KEYS = {"reason", "code", "problems", "detail"}
+REMOVAL_KEYS = {"state", "error", "data_bytes", "runs", "runs_bytes",
+                "out_bytes", "work_folder"}
 # routes_v1 DevState's folder {id, name}, plus from_env (the env's folders
 # cannot be removed: the contract is to name it).
 DEV_FOLDER_KEYS = {"id", "name", "from_env"}
@@ -1009,6 +1232,13 @@ def test_the_types_named_here_are_routes_v1s():
     for key in ("enabled", "folders", "id", "name"):
         assert key in types["DevState"], key
     assert types["RunStarted"] == "{run_id}"
+    for name, keys in (("InstallStatus", INSTALL_KEYS),
+                       ("ConsentSheet", SHEET_KEYS),
+                       ("InstallFailure", FAILURE_KEYS),
+                       ("RemovalInfo", REMOVAL_KEYS),
+                       ("UploadAnswer", {"upload_id", "expires_in_sec"})):
+        for key in keys:
+            assert key in types[name], (name, key)
 
 
 def test_the_detail_and_its_jobs_have_the_types_keys(env):
@@ -1160,7 +1390,9 @@ def test_a_file_artifact_is_sent_up_to_its_checked_size(env, monkeypatch):
     ("POST", f"/{PLUGIN}/runs/{RUN_ID}/artifacts/2:reveal"),
     ("POST", f"/{PLUGIN}/hooks/post/result_image_saved:sample"),
     ("DELETE", f"/{PLUGIN}/secrets/token"),
-    ("DELETE", "/dev/folders/0123456789ab")])
+    ("DELETE", "/dev/folders/0123456789ab"),
+    ("POST", "/installs/i1:cancel"), ("POST", f"/{PLUGIN}:enable"),
+    ("POST", f"/{PLUGIN}:disable")])
 def test_a_route_without_a_body_refuses_a_key(env, method, path):
     _artifacts(env)
     _refused(env.client.open(BASE + path, method=method, json={"x": 1}),

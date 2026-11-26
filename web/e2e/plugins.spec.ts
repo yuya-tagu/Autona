@@ -22,3 +22,17 @@ test("a SHELL route answers 403 without the shell's secret", async ({request}) =
     expect((await request.get(`${base}/taguyan.vodsplit/runs`)).status())
         .toBe(403);
 });
+
+test("the install and removal routes are SHELL too (403 headless)", async ({request}) => {
+    const base = serverUrl("/api/v1/plugins");
+    // The page hides its add / enable / remove controls here (no shell
+    // access); the routes themselves refuse a browser all the same.
+    expect((await request.post(`${base}/uploads`, {data: "PK"})).status())
+        .toBe(403);
+    expect((await request.post(`${base}/installs`,
+                               {data: {upload_id: "x"}})).status()).toBe(403);
+    expect((await request.get(`${base}/taguyan.vodsplit/removal`)).status())
+        .toBe(403);
+    expect((await request.post(`${base}/taguyan.vodsplit:disable`)).status())
+        .toBe(403);
+});

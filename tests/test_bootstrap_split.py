@@ -230,18 +230,27 @@ def test_bootstrap_core_steps_and_their_order():
         "PluginRegistry()",
         "PluginInputs()",
         "PluginJobs()",
+        # The installs (P5a, I4): the installer over the runs (its hold),
+        # the coordinator the routes drive over the installer.
+        "PluginInstaller()",
+        "PluginInstalls()",
         # Every manifest read at launch (E.2; 10-30 ms), so the list
         # is whole before the web server serves it; a failure only logs.
         # The plugin routes are added by the web server when it is made
         # (WebServer.__init__: flask after the window), not here.
         "PluginRegistry.instance.Scan()",
+        # The blocklist in effect (C.4: the listing's copy, else the one
+        # shipped), after the scan: a blocked installed plugin is off
+        # before anything can start it.
+        "PluginInstalls.instance.SetBlocklist(...)",
         # The archive clipper's jobs (ADR-006 A1): after the settings and
         # the plugin runner and runs it is given, before the shells' web
         # server; nothing read or probed here.
         "ArchiveJobService()",
-        # The plugin runs a crash left running (E.2), after the work folder
-        # it names and the scan; a job: the work folder may be a slow
-        # drive (the probe below pins what it is).
+        # The installs' leftovers, then the plugin runs a crash left
+        # running (E.2), after the work folder it names and the scan; one
+        # job: the work folder may be a slow drive (the probe below pins
+        # what it is).
         "TaskExecutor.instance.submit(...)",
         # The archive worker's installer (ADR-006 A7): after the jobs it
         # holds still for its swap and the executor its check and install
@@ -671,6 +680,8 @@ api_at_bootstrap = "src.AutonaPluginApi" in sys.modules
 import os
 from src import bootstrap
 from src.core.PluginInputs import PluginInputs
+from src.core.PluginInstaller import PluginInstaller
+from src.core.PluginInstalls import PluginInstalls
 from src.core.PluginJobs import PluginJobs
 from src.core.PluginRegistry import PluginRegistry
 from src.core.PluginRunner import PluginRunner
@@ -688,7 +699,9 @@ plugins = {
               PluginSettings.instance is not None,
               PluginRegistry.instance is not None,
               PluginInputs.instance is not None,
-              PluginJobs.instance is not None],
+              PluginJobs.instance is not None,
+              PluginInstaller.instance is not None,
+              PluginInstalls.instance is not None],
     "flask_at_bootstrap": flask_at_bootstrap,
     "api_at_bootstrap": api_at_bootstrap,
     # The work folder is the throwaway one (_runtime's settings.json), so
@@ -702,10 +715,16 @@ plugins = {
              deps.settings is PluginSettings.instance,
              deps.secrets is PluginSecrets.instance,
              deps.inputs is PluginInputs.instance,
-             deps.jobs is PluginJobs.instance],
-    # Not this stage's: the reveal is the desktop's, the hooks I5's, the
-    # installer I4's.
-    "later": [deps.revealFile, deps.hooks, deps.installer],
+             deps.jobs is PluginJobs.instance,
+             deps.installs is PluginInstalls.instance],
+    # Not this stage's: the reveal is the desktop's, the hooks I5's.
+    "later": [deps.revealFile, deps.hooks],
+    # The installs hold the runs' starts; nothing blocked (no listing copy
+    # in this throwaway directory, none shipped in a source checkout).
+    "installs": [PluginInstaller.instance._jobs is PluginJobs.instance,
+                 PluginInstalls.instance._installer
+                 is PluginInstaller.instance,
+                 PluginInstalls.instance.Blocklist() == ()],
     # One pick resolver, the shell's picks (L10): the settings', the
     # routes' (a folder field, a run's params, the dev folder to add).
     "pick": [deps.resolvePick("folder", picked) == os.path.abspath("picked"),
@@ -747,7 +766,7 @@ report({
     "slot_order": order,
     "stream_title": [title_before_loop, stream_title],
     "state_subscribers": state_subscribers(),
-    # Made; its first submit is the plugin runs' sweep (one job lane
+    # Made; its first submit is the plugins' sweep (one job lane
     # thread), nothing else.
     "executor_threads": [t.name for t in threading.enumerate()
                          if t.name.startswith(("AutonaJob", "AutonaFanout"))],
@@ -800,15 +819,16 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["app_type"] == "QCoreApplication"
     assert all(result["core"].values()), result["core"]
     assert not any(result["gui"].values()), result["gui"]
-    # The plugin runs' sweep (ADR-009 E.2) is the executor's one job at
+    # The plugins' sweep (the installs' and the runs': ADR-009 E.2) is the
+    # executor's one job at
     # launch: a lane thread for it, no fan-out.
     assert len(result["executor_threads"]) == 1, result["executor_threads"]
     assert result["executor_threads"][0].startswith("AutonaJob")
     # The plugins (ADR-009 E.1): every part, every plugin route on the v1
     # blueprint added by the shells' web server (not the bootstrap: flask
     # stays after the window), the registry scanned, the routes' deps the
-    # parts themselves -- the reveal, the hooks and the installer left to
-    # the desktop / I5 / I4 -- and one pick resolver, the shell's picks.
+    # parts themselves -- the reveal and the hooks left to the desktop /
+    # I5 -- and one pick resolver, the shell's picks.
     plugins = result["plugins"]
     assert all(plugins["parts"]), plugins
     assert plugins["flask_at_bootstrap"] is False
@@ -816,7 +836,8 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert plugins["work_dir"] is True
     assert plugins["listed"] == ["taguyan.vodsplit"]
     assert all(plugins["deps"]), plugins
-    assert plugins["later"] == [None, None, None]
+    assert plugins["later"] == [None, None]
+    assert plugins["installs"] == [True, True, True]
     assert plugins["pick"] == [True, None, None]
     assert plugins["same_pick"] is True
     assert plugins["user_data"] == [True]

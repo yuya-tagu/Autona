@@ -17,6 +17,7 @@ import {
     versionLabel,
 } from "./pluginText";
 import FieldForm from "./FieldForm";
+import PluginManage, {canManage} from "./PluginManage";
 import {
     FormValues,
     collectValues,
@@ -285,12 +286,14 @@ function Declared({plugin, language}: {
 }
 
 export default function PluginDetailView({api, id, language, onChanged,
-                                          onError}: {
+                                          onRemoved, onError}: {
     api: PluginsApi;
     id: string;
     language: string;
     // The list's row may have changed (state, size).
     onChanged: () => void;
+    // The plugin was removed: the page leaves it.
+    onRemoved: () => void;
     onError: (text: string) => void;
 }) {
     const [plugin, setPlugin] = React.useState<PluginDetail | null>(null);
@@ -449,6 +452,15 @@ export default function PluginDetailView({api, id, language, onChanged,
                                 onClick={reload}>
                             {i18n.t("plugins_reload")}
                         </Button>
+                    ) : null}
+                    {canManage(plugin) ? (
+                        <PluginManage api={api} plugin={plugin}
+                                      onChanged={() => {
+                                          onChanged();
+                                          void read();
+                                      }}
+                                      onRemoved={onRemoved}
+                                      onError={onError}/>
                     ) : null}
                 </Stack>
             </CardFrame>

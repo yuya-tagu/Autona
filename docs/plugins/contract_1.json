@@ -436,6 +436,10 @@
     "install_note": "UTF-8 without a BOM, written by the installer only, inside the swap. One that cannot be read makes the next install of the id a new install (the safe side).",
     "data_dir": "user_data/plugins/<id>/data/",
     "listing_copy": "user_data/plugins/_listing.json",
+    "listing_bundled": "<Autona folder>/assets/plugins.json (the copy shipped with Autona; none in a source checkout)",
+    "listing_note": "The blocklist in effect is the listing copy's blocked rows, else the shipped copy's, else none (fetching plugins.json is P5b's).",
+    "enabled": "user_data/plugins/<id>/enabled.json",
+    "enabled_fields": {"enabled": "boolean (false: disabled; no file, or one that cannot be read, is enabled)"},
     "work_dir": "<archive.work_dir>/plugins/<id>/<run_id>/",
     "job_files": ["request.json", "job.json", "worker.log", "inputs/", "out/"]
   },
@@ -444,6 +448,12 @@
     "source_kinds": ["github", "manual"],
     "source_kinds_note": "github: downloaded from the listing or an update, or a manual zip whose SHA-256 matched that repository's latest release descriptor (C.3); manual: any other zip. A dev folder and the built-in have no install.json.",
     "zip_problems": ["zip_unreadable", "too_many_entries", "expanded_too_large", "unsafe_path", "bad_name", "not_ascii", "reserved_name", "link", "encrypted", "duplicate_name", "path_too_long", "zip_too_large", "descriptor_invalid", "size_mismatch", "sha256_mismatch", "not_one_folder", "folder_not_id", "manifest_missing", "manifest_unreadable", "id_mismatch", "version_mismatch", "entry_outside", "entry_missing"],
+    "states": ["preparing", "consent", "installing", "done", "failed", "cancelled"],
+    "states_note": "An install (routes_v1.json InstallStatus): preparing (a job: the zip checked and expanded to .new, plugin.json read) -> consent (the sheet shown) -> installing (a job: describe in .new, the swap, install.json) -> done. failed carries the error; cancelled is a declined sheet. A consent refused because a run of the plugin goes returns to consent with the error (busy).",
+    "removal_states": ["idle", "removing", "failed"],
+    "removal_states_note": "A removal (routes_v1.json RemovalInfo): idle (none asked), removing (a job), failed (the last one's error). A removal that succeeded leaves the plugin gone (404).",
+    "errors": {"network_failed": "unavailable", "bad_zip": "incompatible", "manifest_invalid": "incompatible", "blocked": "blocked", "in_progress": "busy", "running": "busy", "describe_failed": "incompatible", "manifest_changed": "incompatible", "extract_failed": "unavailable", "swap_failed": "unavailable", "not_pending": "not_found", "not_found": "not_found", "remove_failed": "unavailable", "secrets_failed": "unavailable", "stopped": "unavailable", "invalid_request": "invalid_request", "disk_full": "unavailable", "builtin": "invalid_request", "refuse_dev_id": "id_taken", "refuse_reserved": "incompatible", "failed": "unavailable"},
+    "errors_note": "An install's or a removal's failure (routes_v1.json InstallFailure): its code (PluginInstaller's InstallError, and failed for anything unexpected) -> the refusal reason it carries. problems holds bad_zip's zip_problems, manifest_invalid's manifest check codes and describe_failed's describe failure. manifest_changed: the staged plugin.json no longer matches the consented sheet at the commit (the staged copy is discarded).",
     "zip_problems_note": "PluginInstaller.CheckZip's codes (C.1 / C.7): the zip's own rules first (unreadable, over zip_max_entries / zip_expanded_max_bytes, a path that escapes, a bad, non-ASCII or reserved name, a link, an encrypted entry, a name twice, the longest installed path over installed_path_max_length), then over zip_max_bytes, the release descriptor (its fields, the zip's size and SHA-256), and the layout (one <id>/ folder named a plugin id, its plugin.json readable, the id and version against the descriptor, entry[0] a file of the zip)."
   },
 
@@ -559,7 +569,7 @@
       {"reason": "id_taken", "status": 409, "note": "a dev folder with an installed id, or an install with a dev folder's"},
       {"reason": "invalid_request", "status": 400, "note": "a body that does not fit: an unknown job or key, a value of the wrong type, an unknown pick id"},
       {"reason": "not_found", "status": 404},
-      {"reason": "unavailable", "status": 503, "note": "a desktop feature asked in the headless shell (an image input, a hook), the shell is shutting down, or the host could not write its own file (dev.json, config.json, hooks.json, a run's folder; the detail says which, never the path). SHELL routes answer 403 headless before this"}
+      {"reason": "unavailable", "status": 503, "note": "a desktop feature asked in the headless shell (an image input, a hook), the shell is shutting down, or the host could not write its own file (dev.json, config.json, hooks.json, a run's folder; the detail says which, never the path), or the plugin is being installed or removed (its starts are held). SHELL routes answer 403 headless before this"}
     ]
   },
 

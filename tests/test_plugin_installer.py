@@ -9,6 +9,7 @@ import collections
 import hashlib
 import json
 import os
+import re
 import stat
 import struct
 import zipfile
@@ -20,7 +21,7 @@ from loguru import logger
 from src.core import PluginInstaller as installer_module
 from src.core.PluginInstaller import (
     BAD_ZIP, BLOCKED, BUILTIN, DESCRIBE_FAILED, DISK_FULL, EXTRACT_FAILED,
-    IN_PROGRESS, MANIFEST_INVALID, NETWORK_FAILED, NOT_FOUND, NOT_PENDING,
+    IN_PROGRESS, MANIFEST_CHANGED, MANIFEST_INVALID, NETWORK_FAILED, NOT_FOUND, NOT_PENDING,
     RUNNING, SECRETS_FAILED, SWAP_FAILED, BlockedBy, CheckDescriptor,
     ConsentDigest, DecideSource, InstallError, ParseBlocklist,
     PluginInstaller, VersionMatches)
@@ -239,11 +240,30 @@ class FakeHooks:
 
 
 class FakeJobs:
+    """PluginJobs' Running and its hold (a held plugin's starts are
+    refused: FakeJobs only counts them). ``startOnHold``: a run of the
+    plugin got its lane just before the hold."""
+
     def __init__(self):
         self.running = set()
+        self.held = {}
+        self.holds = []
+        self.startOnHold = False
 
     def Running(self, pluginId):
         return pluginId in self.running
+
+    def Hold(self, pluginId):
+        if self.startOnHold:
+            self.running.add(pluginId)
+        self.held[pluginId] = self.held.get(pluginId, 0) + 1
+        self.holds.append(pluginId)
+        return pluginId not in self.running
+
+    def Unhold(self, pluginId):
+        self.held[pluginId] -= 1
+        if not self.held[pluginId]:
+            del self.held[pluginId]
 
 
 @pytest.fixture
@@ -1407,13 +1427,42 @@ def test_a_forget_that_fails_stops_the_removal(env):
     env.installer.Remove(PLUGIN, data=True, runs="delete")  # not held
 
 
-def test_a_run_started_while_forgetting_stops_the_removal(env):
+def test_the_removal_holds_the_plugins_starts_while_it_removes(env):
+    # No run of it can start between the check and the folder's removal
+    # (PluginJobs.Hold refuses its starts): the hooks are forgotten under
+    # the hold, and the hold is given back however the removal ends.
     _install_manual(env)
-    env.hooks.then = lambda: env.jobs.running.add(PLUGIN)
+    seen = []
+    env.hooks.then = lambda: seen.append(dict(env.jobs.held))
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert seen == [{PLUGIN: 1}]
+    assert env.jobs.held == {}
+    assert not (env.plugins / PLUGIN).exists()
+
+
+def test_a_run_that_got_its_lane_before_the_hold_stops_the_removal(env):
+    _install_manual(env)
+    env.hooks.forgotten.clear()
+    env.jobs.startOnHold = True
     with pytest.raises(InstallError) as error:
         env.installer.Remove(PLUGIN, data=True, runs="delete")
     assert error.value.code == RUNNING
     assert (env.plugins / PLUGIN).is_dir()
+    assert env.hooks.forgotten == [] and env.jobs.held == {}
+
+
+def test_the_swap_holds_the_plugins_starts(env):
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    env.jobs.startOnHold = True
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == RUNNING
+    assert env.installer.Pending(PLUGIN) is pending
+    assert env.jobs.held == {} and not (env.plugins / PLUGIN).exists()
+    env.jobs.startOnHold = False
+    env.jobs.running.clear()
+    env.installer.Commit(pending)
+    assert env.jobs.holds == [PLUGIN, PLUGIN] and env.jobs.held == {}
 
 
 # ── the launch's sweep ──────────────────────────────────────────────────
@@ -1430,7 +1479,8 @@ def test_sweep_cleans_what_a_crash_left(env):
     (plugins / "Not An Id.new").mkdir()
     (plugins / ".upload-0123456789abcdef.part").write_bytes(b"copy")
     (plugins / ".upload-short.part").write_bytes(b"not ours")
-    env.installer.Sweep()
+    # The ids with leftovers (a scan follows when any).
+    assert env.installer.Sweep() == 4
     assert sorted(os.listdir(plugins)) == [".upload-short.part",
                                            "Not An Id.new", "kept.one",
                                            "lost.one", "unrelated.folder"]
@@ -1444,7 +1494,78 @@ def test_sweep_leaves_a_pending_install(env):
 
 
 def test_sweep_without_a_plugins_folder(env):
-    env.installer.Sweep()
+    assert env.installer.Sweep() == 0
+
+
+def test_an_upload_path_is_a_private_part_file_the_sweep_removes(env):
+    path = env.installer.UploadPath()
+    assert os.path.dirname(path) == str(env.plugins)
+    assert re.fullmatch(r"\.upload-[0-9a-f]{16}\.part",
+                        os.path.basename(path))
+    assert not os.path.exists(path)
+    assert env.installer.UploadPath() != path
+    with open(path, "wb") as file:
+        file.write(b"zip")
+    assert env.installer.Sweep() == 0
+    assert not os.path.exists(path)
+
+
+# ── the user's enable ───────────────────────────────────────────────────
+
+def test_a_plugin_is_enabled_until_it_is_disabled(env):
+    _install_manual(env)
+    assert env.installer.IsEnabled(PLUGIN) is True
+    env.installer.SetEnabled(PLUGIN, False)
+    assert json.loads((_user_dir(env) / "enabled.json").read_text()) == {
+        "enabled": False}
+    assert env.installer.IsEnabled(PLUGIN) is False
+    # Read once and kept: a second installer reads the file.
+    again = PluginInstaller(str(env.app), str(env.user),
+                            registry=env.registry, runner=env.runner,
+                            hostVersion="1.0.0")
+    assert again.IsEnabled(PLUGIN) is False
+    env.installer.SetEnabled(PLUGIN, True)
+    assert env.installer.IsEnabled(PLUGIN) is True
+    assert not (_user_dir(env) / "enabled.json.tmp").exists()
+
+
+def test_a_broken_enabled_file_reads_enabled(env):
+    _user_dir(env).mkdir(parents=True)
+    (_user_dir(env) / "enabled.json").write_text("{not json")
+    assert env.installer.IsEnabled(PLUGIN) is True
+    assert env.installer.IsEnabled("not an id") is True
+    with pytest.raises(InstallError):
+        env.installer.SetEnabled("../escape", False)
+
+
+def test_a_removal_and_a_new_install_forget_the_enable(env):
+    _install_manual(env)
+    env.installer.SetEnabled(PLUGIN, False)
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert env.installer.IsEnabled(PLUGIN) is True
+    _install_manual(env, name="b.zip")
+    assert env.installer.IsEnabled(PLUGIN) is True
+
+
+# ── what a removal would remove ─────────────────────────────────────────
+
+def test_the_removal_sizes_name_the_work_folder_not_its_path(env):
+    _install_manual(env)
+    data = _user_dir(env) / "data"
+    data.mkdir(parents=True)
+    (data / "a.bin").write_bytes(b"x" * 10)
+    runs = env.work / "plugins" / PLUGIN
+    for run, size in (("r1", 3), ("r2", 5)):
+        (runs / run / "out").mkdir(parents=True)
+        (runs / run / "job.json").write_bytes(b"j" * size)
+        (runs / run / "out" / "o.txt").write_bytes(b"o" * 7)
+    (runs / "stray.txt").write_bytes(b"s")
+    assert env.installer.RemovalSizes(PLUGIN) == (10, 2, 22, 14, "work")
+
+
+def test_the_removal_sizes_without_anything(env):
+    _install_manual(env)
+    assert env.installer.RemovalSizes(PLUGIN) == (0, 0, 0, 0, "work")
 
 
 def test_the_zip_bytes_are_reported(env):
@@ -1466,3 +1587,106 @@ def test_the_module_reads_its_input_only_from_arguments():
     for name in ("urllib", "requests", "http.client", "subprocess",
                  "socket"):
         assert f"import {name}" not in source
+
+
+# ── the review's fixes: the consented manifest, links in a removal ──────
+
+def test_a_staged_manifest_changed_after_the_consent_refuses_the_commit(env):
+    # The page consented to the sheet it showed: a plugin.json changed in
+    # .new since (more permissions) is not what was consented to.
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    path = os.path.join(pending.new_dir, "plugin.json")
+    with open(path, encoding="utf-8") as file:
+        raw = json.load(file)
+    raw["permissions"]["network"] = ["evil.example.com"]
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(raw, file)
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == MANIFEST_CHANGED
+    assert not os.path.exists(pending.new_dir)
+    assert not (env.plugins / PLUGIN).exists()
+    assert env.runner.described == []
+    assert env.installer.ReadInstallRecord(PLUGIN) is None
+
+
+def test_an_unreadable_staged_manifest_at_the_commit_is_changed_too(env):
+    pending = env.installer.PrepareFromZip(_plugin_zip(env.tmp / "a.zip"))
+    os.remove(os.path.join(pending.new_dir, "plugin.json"))
+    with pytest.raises(InstallError) as error:
+        env.installer.Commit(pending)
+    assert error.value.code == MANIFEST_CHANGED
+    assert not os.path.exists(pending.new_dir)
+
+
+def _folder_link(target, link):
+    """Folder ``link`` leading to ``target`` (a symlink, else a junction:
+    no privilege needed); skips where neither can be made."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        except (ImportError, AttributeError, OSError):
+            pytest.skip("no symlink or junction here")
+
+
+def _outside(env):
+    outside = env.tmp / "outside"
+    (outside / "out").mkdir(parents=True, exist_ok=True)
+    (outside / "keep.txt").write_text("mine")
+    (outside / "out" / "o.txt").write_text("mine too")
+    return outside
+
+
+def _untouched(outside):
+    assert (outside / "keep.txt").read_text() == "mine"
+    assert (outside / "out" / "o.txt").read_text() == "mine too"
+
+
+@pytest.mark.parametrize("runs", ["keep_out", "delete"])
+def test_a_removal_does_not_follow_a_linked_work_folder(env, runs):
+    _install_manual(env)
+    outside = _outside(env)
+    (env.work / "plugins").mkdir(parents=True, exist_ok=True)
+    work = env.work / "plugins" / PLUGIN
+    if work.exists():
+        os.rmdir(work)
+    _folder_link(outside, work)
+    env.installer.Remove(PLUGIN, data=True, runs=runs)
+    assert not os.path.lexists(work)
+    _untouched(outside)
+
+
+@pytest.mark.parametrize("runs", ["keep_out", "delete"])
+def test_a_removal_does_not_follow_a_linked_run_or_part_of_one(env, runs):
+    _folder, work = _installed_with_state(env)
+    outside = _outside(env)
+    _folder_link(outside, work / "20261126-213200-e5f6")
+    runId = "20261126-213000-a1b2"
+    _folder_link(outside, work / runId / "linked")
+    env.installer.Remove(PLUGIN, data=True, runs=runs)
+    _untouched(outside)
+    if runs == "keep_out":
+        assert not os.path.lexists(work / "20261126-213200-e5f6")
+        assert os.listdir(work / runId) == ["out"]
+    else:
+        assert not work.exists()
+
+
+def test_a_removal_does_not_follow_a_linked_user_folder_part(env):
+    folder, _work = _installed_with_state(env)
+    outside = _outside(env)
+    _folder_link(outside, folder / "linked")
+    env.installer.Remove(PLUGIN, data=True, runs="delete")
+    assert not folder.exists()
+    _untouched(outside)
+    # Kept data: the link inside data/ stays a link (data is the user's).
+    _install_manual(env, name="b.zip")
+    folder = _user_dir(env)
+    (folder / "data").mkdir(exist_ok=True)
+    _folder_link(outside, folder / "other")
+    env.installer.Remove(PLUGIN, data=False, runs="delete")
+    assert not os.path.lexists(folder / "other")
+    _untouched(outside)

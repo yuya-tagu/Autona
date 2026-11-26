@@ -1192,7 +1192,10 @@ class PluginRegistry:
         if not builtin and (not PluginUsable(report) or not UsableJobs(report)
                             or (describe is not None and describe.failure)):
             applies.add(PluginState.INCOMPATIBLE)
-        enabled = builtin or bool(self._Call(self._isEnabled, True, plugin.id))
+        # A dev folder is always enabled (an installed copy's enabled.json
+        # of the same id is not its).
+        enabled = builtin or dev or bool(
+            self._Call(self._isEnabled, True, plugin.id))
         if not enabled:
             applies.add(PluginState.DISABLED)
         if self._Call(self._isRunning, False, plugin.id):

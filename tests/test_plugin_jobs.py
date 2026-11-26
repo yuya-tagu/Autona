@@ -608,6 +608,98 @@ def test_cancel(env):
     assert env.ended[0].cancel_requested
 
 
+def test_a_held_plugin_starts_nothing_until_it_is_given_back(env):
+    # The swap and a removal (PluginInstaller) hold the plugin's starts:
+    # refused unavailable (a pending hook is then discarded), counted.
+    assert env.jobs.Hold(PLUGIN) is True
+    assert env.jobs.Hold(PLUGIN) is True
+    refused = env.StartPost()
+    assert refused.reason is StartRefusal.UNAVAILABLE
+    assert env.runner.started == []
+    env.jobs.Unhold(PLUGIN)
+    assert env.StartPost().reason is StartRefusal.UNAVAILABLE
+    env.jobs.Unhold(PLUGIN)
+    assert env.StartPost().run_id
+    # Another plugin's hold does not touch it.
+    env.End(0, _Done())
+    env.jobs.Hold("other.plugin")
+    assert env.StartPost().run_id
+    env.jobs.Unhold("other.plugin")
+    env.jobs.Unhold("never.held")  # nothing to give back: no error
+
+
+def test_a_hold_while_a_run_holds_a_lane_answers_false(env):
+    env.StartPost()
+    assert env.jobs.Hold(PLUGIN) is False
+    env.jobs.Unhold(PLUGIN)
+    # A claimed lane is its owner's run too.
+    assert env.jobs.Claim(Lane.HEAVY, "taguyan.vodsplit")
+    assert env.jobs.Hold("taguyan.vodsplit") is False
+    env.jobs.Unhold("taguyan.vodsplit")
+
+
+def test_cancel_all_asks_every_run_of_the_plugin(env):
+    assert env.jobs.CancelAll(PLUGIN) == 0
+    light = env.StartPost()
+    heavy = env.jobs.Start(PLUGIN, "split", MANUAL, {}, {}, {})
+    assert env.jobs.CancelAll(PLUGIN) == 2
+    assert [item[3].cancels for item in env.runner.started] == [1, 1]
+    assert env.jobs.Get(PLUGIN, light.run_id).cancel_requested
+    assert env.jobs.Get(PLUGIN, heavy.run_id).cancel_requested
+    assert env.jobs.CancelAll("other.plugin") == 0
+    # A claimed lane is not a run of the plugin: its owner's.
+    env.End(1, RunOutcome(state=JobState.CANCELLED, cancel_requested=True))
+    assert env.jobs.Claim(Lane.HEAVY, PLUGIN)
+    env.End(0, RunOutcome(state=JobState.CANCELLED, cancel_requested=True))
+    assert env.jobs.CancelAll(PLUGIN) == 0
+
+
+def test_a_run_writing_its_folder_still_counts_as_running(env):
+    # The lane is freed before job.json is written (_Settle): a removal
+    # waiting for Running must not take the folder under that write.
+    env.StartPost()
+    seen = []
+    settle = env.jobs._Settle
+
+    def watched(run, record):
+        seen.append((env.jobs.Running(PLUGIN), env.jobs.Hold(PLUGIN)))
+        env.jobs.Unhold(PLUGIN)
+        return settle(run, record)
+
+    env.jobs._Settle = watched
+    env.End(0, _Done())
+    assert seen == [(True, False)]
+    assert not env.jobs.Running(PLUGIN) and env.jobs.Hold(PLUGIN)
+
+
+def test_a_start_planned_before_a_hold_is_refused_at_its_lane(env):
+    # The plan reads the registry (enabled, blocked, the manifest) outside
+    # the lock: a disable / block / swap / removal held and given back in
+    # between makes that plan stale -- refused, nothing launched.
+    plan = env.jobs._Plan
+
+    def stale(*args):
+        planned = plan(*args)
+        env.jobs.Hold(PLUGIN)
+        env.jobs.Unhold(PLUGIN)
+        return planned
+
+    env.jobs._Plan = stale
+    refused = env.StartPost()
+    assert refused.reason is StartRefusal.UNAVAILABLE
+    assert env.runner.started == []
+    assert not env.jobs.Running(PLUGIN)
+    # Another plugin's hold does not make it stale.
+    env.jobs._Plan = lambda *args: (env.jobs.Hold("other.plugin"),
+                                    env.jobs.Unhold("other.plugin"),
+                                    plan(*args))[2]
+    assert env.StartPost().run_id
+    env.End(0, _Done())
+    # A plan read after the hold was given back starts.
+    env.jobs._Plan = plan
+    assert env.StartPost().run_id
+
+
 def _Logged(action):
     lines = []
     sink = logger.add(lambda message: lines.append(str(message)),
