@@ -204,10 +204,10 @@ importlib.import_module("src.core.PluginTypes")
 # The plugin parts (ADR-009 E.1): singletons created by bootstrap_core();
 # no manifest read, no folder made, no process or thread started on
 # import. The plugin routes (AutonaPluginApi) are added to the v1 blueprint
-# by bootstrap_core(), never on import.
+# by the web server when it is made (WebServer.__init__), never on import.
 plugin_parts = [importlib.import_module(f"src.core.{name}") for name in (
     "PluginRunner", "PluginSecrets", "PluginSettings", "PluginRegistry",
-    "PluginInputs", "PluginJobs")]
+    "PluginInputs", "PluginJobs", "ShellPicks")]
 plugin_api = importlib.import_module("src.AutonaPluginApi")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
@@ -378,6 +378,7 @@ for module in plugin_parts:
     name = module.__name__.rsplit(".", 1)[1]
     assert getattr(module, name).instance is None, \
         f"import created {name}.instance"
+assert importlib.import_module("src.core.PluginJobs")._kernel32 is None,     "import loaded kernel32 (the sweep's host check)"
 assert getattr(importlib.import_module("src.AutonaApiV1").api_v1,
                plugin_api._BOUND_ATTRIBUTE, None) is None, \
     "import added the plugin routes to the v1 blueprint"

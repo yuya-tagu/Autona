@@ -39,6 +39,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import isolated_settings
 from tests.test_bootstrap_split import _free_port, _runtime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +114,7 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
     tag = f"pytest-{uuid.uuid4().hex}"
     with _runtime(tmp_path) as cwd:
         (cwd / "user_data" / "settings.json").write_text(json.dumps({
+            **isolated_settings(cwd),
             "general": {"webserver_port": port,
                         "webserver_listen_lan": False}}), encoding="utf-8")
         console_path = tmp_path / "console.txt"

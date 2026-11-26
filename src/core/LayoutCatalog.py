@@ -590,6 +590,16 @@ def _Base(root):
     return os.path.abspath(root) if root else Root()
 
 
+def RevealFile(path):
+    """Show the file ``path`` selected in its folder in this PC's file
+    manager, by the catalog's own rules (_Reveal: quoted for Explorer, no
+    shell): another module's "show in Explorer" of a file it names itself
+    (the plugin routes' artifacts, ADR-009 D4). True when it was shown,
+    False when it was refused; a file manager that cannot be started raises
+    OSError."""
+    return _Reveal(path, os.path.dirname(path), select=True)
+
+
 def _Reveal(path, base, select):
     """Show ``path`` (a file the catalog found, selected in its folder; or,
     not ``select``, a folder, opened) in this PC's file manager: True."""

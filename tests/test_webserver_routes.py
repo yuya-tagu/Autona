@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
 
@@ -627,7 +629,7 @@ def test_api_v1_route_ledger():
 
 
 def test_plugin_route_ledger():
-    # The wiring's call (bootstrap_core()) on a v1 blueprint of its own:
+    # The wiring's call (WebServer.__init__) on a v1 blueprint of its own:
     # the session's api_v1 keeps the parts the harness gave it.
     from flask import Blueprint, Flask
 
@@ -650,6 +652,28 @@ def test_plugin_route_ledger():
     # blueprint itself.
     assert not ({(rule, methods) for rule, _e, methods in EXPECTED_PLUGIN_ROUTES}
                 & {(rule, methods) for rule, _e, methods in EXPECTED_API_V1_ROUTES})
+
+
+def test_plugin_routes_added_after_registration_are_refused_by_name():
+    # A blueprint an app already registered takes no rule (Flask's own
+    # message names no plugin): the wiring's mistake is said as one. Called
+    # again once its routes are there, it only hands them the new parts.
+    from flask import Blueprint, Flask
+
+    from src.AutonaPluginApi import PluginApiDeps, RegisterPluginRoutes
+
+    late = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+    Flask(__name__).register_blueprint(late)
+    with pytest.raises(RuntimeError, match="RegisterPluginRoutes before"):
+        RegisterPluginRoutes(late, PluginApiDeps())
+
+    early = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+    RegisterPluginRoutes(early, PluginApiDeps())
+    Flask(__name__).register_blueprint(early)
+    again = PluginApiDeps()
+    RegisterPluginRoutes(early, again)
+    from src import AutonaPluginApi
+    assert getattr(early, AutonaPluginApi._BOUND_ATTRIBUTE).deps is again
 
 
 # ── Access classification (ADR-005 S3a) ──────────────────────────────────

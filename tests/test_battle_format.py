@@ -255,6 +255,9 @@ _WINDOW_SCRIPT = _PRELUDE + r'''
 from pathlib import Path
 
 Path("user_data/settings.json").write_text(json.dumps({
+    # The work folder inside the throwaway directory (the launch's plugin
+    # sweep reads it): tests/conftest.py isolated_settings.
+    "archive": {"work_dir": str(Path("work").resolve())},
     "general": {"webserver_port": int(sys.argv[2]),
                 "webserver_listen_lan": False},
     "hotkeys": {"hotkeys_enabled": False},

@@ -29,6 +29,12 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
   job.json last, so one cut short is still found and removed again;
 - the launch's Sweep (job.json still running -> FAILED / AUTONA_EXITED)
   and the shells' Shutdown (cancel this module's runs, wait the grace).
+  The sweep leaves alone a run of this process (active, or started since
+  PluginJobs was made: the sweep is a job, a run may start meanwhile) and
+  a run of another Autona still alive on the same work folder: job.json
+  carries its host's process (HOST_KEY, private: not contract_1.json's
+  job_record, never read into a RunRecord or served) and the sweep asks
+  whether that process is still the same one running.
 
 Callbacks: ``onRunEnded(record)``, then ``onLaneFreed(lane)``, outside
 both locks on the thread that ended the run (a runner thread), or that
@@ -111,6 +117,18 @@ _FAILED_HOOK_STATES = frozenset({JobState.FAILED, JobState.ERROR})
 _PLUGINS_DIR = "plugins"
 _DEV_DIR = "_dev"
 _DATA_DIR = "data"
+# job.json's private key: the host process that wrote it, {"pid": int,
+# "started": int | null} (its creation time, so a reused pid is not taken
+# for it). Not contract_1.json's job_record: RecordFrom never reads it and
+# the routes never serve it; only the Sweep asks it.
+HOST_KEY = "_host"
+# OpenProcess's access for the creation time and the exit code, the error
+# it gives for a process that is there but not ours to ask, and the exit
+# code of one still running.
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_ACCESS_DENIED = 5
+_STILL_ACTIVE = 259
+_kernel32 = None
 
 _REJECTION_TEXT = {
     ArtifactRejection.OUTSIDE_OUT_DIR: ("out フォルダの外", "outside out_dir"),
@@ -134,6 +152,111 @@ def _RandomSuffix():
 
 def _Iso(moment):
     return moment.isoformat(timespec="seconds")
+
+
+def _Kernel32():
+    """kernel32 with the calls the host's identity needs, made on first use
+    (nothing on import), an instance of its own so its argtypes are no
+    other module's."""
+    global _kernel32
+    if _kernel32 is None:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
+                                         wintypes.DWORD)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetProcessTimes.argtypes = (
+            wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.GetExitCodeProcess.argtypes = (
+            wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        _kernel32 = kernel32
+    return _kernel32
+
+
+def _ProcessStarted(pid):
+    """(alive, started) of process ``pid``: alive True / False, or None
+    when it is there but cannot be asked (another user's: access denied);
+    started its creation time (FILETIME ticks), None when not known. Off
+    Windows, alive is asked with signal 0 and started is never known."""
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False, None
+        except OSError:
+            return None, None
+        return True, None
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = _Kernel32()
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False,
+                                  pid)
+    if not handle:
+        if ctypes.get_last_error() == _ERROR_ACCESS_DENIED:
+            return None, None
+        return False, None
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return None, None
+        if code.value != _STILL_ACTIVE:
+            return False, None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *map(ctypes.byref, times)):
+            return True, None
+        created = times[0]
+        return True, (created.dwHighDateTime << 32) | created.dwLowDateTime
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def ThisHost():
+    """This process as job.json's HOST_KEY names it."""
+    pid = os.getpid()
+    try:
+        _alive, started = _ProcessStarted(pid)
+    except (OSError, AttributeError, ValueError):
+        started = None
+    return {"pid": pid, "started": started}
+
+
+def HostAlive(host) -> bool:
+    """Whether the host job.json's HOST_KEY names (a value read back, any
+    shape) is still that process running: its pid alive and, when both are
+    known, created at the same time (a pid reused by another process is
+    not it). One that is there but cannot be asked counts as alive -- its
+    run is left alone rather than marked failed under it. False for what
+    is not a host."""
+    if not isinstance(host, Mapping):
+        return False
+    pid, started = host.get("pid"), host.get("started")
+    if (not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
+            or not (started is None or (isinstance(started, int)
+                                        and not isinstance(started, bool)))):
+        return False
+    try:
+        alive, now = _ProcessStarted(pid)
+    except (OSError, AttributeError, ValueError, OverflowError):
+        return True
+    if alive is None:
+        return True
+    if not alive:
+        return False
+    return started is None or now is None or now == started
+
+
+def _StartedSince(text, moment):
+    """Whether a record's started_at (ISO 8601 with offset) is ``moment``
+    or later; False for what cannot be read as one."""
+    try:
+        return datetime.datetime.fromisoformat(text) >= moment
+    except (TypeError, ValueError):
+        return False
 
 
 def _Failure(error):
@@ -660,7 +783,10 @@ class PluginJobs:
     - ``onRunEnded(record)`` / ``onLaneFreed(lane)``: see the module;
     - ``clock()``: an aware local datetime (run ids, times, remaining);
     - ``environ()``: the parent environment for BuildEnvironment;
-    - ``randomSuffix()``: the run id's last three characters ([a-z0-9]).
+    - ``randomSuffix()``: the run id's last three characters ([a-z0-9]);
+    - ``host``: this process as job.json's HOST_KEY names it (ThisHost);
+    - ``hostAlive(host)``: whether a host read back from job.json is still
+      running (HostAlive): the Sweep leaves its runs alone.
     """
 
     # The one bootstrap_core() makes (ADR-009 E.1); None until then.
@@ -675,7 +801,9 @@ class PluginJobs:
                  clock: Callable[[], datetime.datetime] = _LocalNow,
                  environ: Callable[[], Mapping[str, str]] =
                  lambda: dict(os.environ),
-                 randomSuffix: Callable[[], str] = _RandomSuffix):
+                 randomSuffix: Callable[[], str] = _RandomSuffix,
+                 host: Optional[Mapping[str, Any]] = None,
+                 hostAlive: Callable[[Any], bool] = HostAlive):
         self._runner = runner
         self._registry = registry
         self._inputs = inputs
@@ -691,6 +819,11 @@ class PluginJobs:
         self._clock = clock
         self._environ = environ
         self._randomSuffix = randomSuffix
+        self._host = dict(host) if host is not None else ThisHost()
+        self._hostAlive = hostAlive
+        # A run started at this second or later is this process's (the
+        # sweep's job may come after a start; started_at has seconds).
+        self._madeAt = clock().replace(microsecond=0)
         self._lock = threading.Lock()
         self._launched = threading.Condition(self._lock)
         self._filesLock = threading.Lock()
@@ -762,8 +895,22 @@ class PluginJobs:
             return None
 
     def _WriteRecord(self, folder, record):
+        content = RecordJson(record)
+        content[HOST_KEY] = self._host
         with self._filesLock:
-            _WriteJson(os.path.join(folder, JOB_FILE), RecordJson(record))
+            _WriteJson(os.path.join(folder, JOB_FILE), content)
+
+    def _RecordHost(self, folder):
+        """job.json's HOST_KEY as written (any shape), None when there is
+        none or the file cannot be read."""
+        with self._filesLock:
+            try:
+                with open(os.path.join(folder, JOB_FILE),
+                          encoding="utf-8") as file:
+                    raw = json.load(file)
+            except (OSError, ValueError):
+                return None
+        return raw.get(HOST_KEY) if isinstance(raw, Mapping) else None
 
     # ── the lanes ──────────────────────────────────────────────────────
 
@@ -1483,10 +1630,13 @@ class PluginJobs:
             handle.Cancel()
         return True
 
-    def Sweep(self) -> None:
-        """At launch: every generic run job.json still calls running (and
-        that is not a run of this process) -> FAILED / AUTONA_EXITED; then
-        the keeping rules per plugin."""
+    def Sweep(self, stopping: Callable[[], bool] = lambda: False) -> None:
+        """At launch: every generic run job.json still calls running ->
+        FAILED / AUTONA_EXITED, but a run of this process (active, or
+        started since this object was made) and a run of another host still
+        alive (HOST_KEY, hostAlive); then the keeping rules per plugin.
+        ``stopping()`` is asked before each plugin: True ends the sweep
+        there (the app is closing; the next launch sweeps the rest)."""
         root = os.path.join(self._workDir(), _PLUGINS_DIR)
         if _IsLink(root):
             return
@@ -1500,6 +1650,9 @@ class PluginJobs:
         active = self._ActiveIds()
         finishedAt = _Iso(self._clock())
         for pluginId in plugins:
+            if stopping():
+                logger.info("Plugins: the sweep stopped: closing")
+                return
             try:
                 self._SweepPlugin(pluginId, active, finishedAt)
             except Exception as error:
@@ -1514,7 +1667,12 @@ class PluginJobs:
         dev = registered is not None and Badge(registered.badge) is Badge.DEV
         for folder, record in self._Scan(pluginWork)[0]:
             if (record.state is not JobState.RUNNING
-                    or (pluginId, record.run_id) in active):
+                    or (pluginId, record.run_id) in active
+                    or _StartedSince(record.started_at, self._madeAt)):
+                continue
+            if self._hostAlive(self._RecordHost(folder)):
+                logger.info(f"Plugins: run {record.run_id} of {pluginId} "
+                            "is another Autona's, still running; left alone")
                 continue
             swept = dataclasses.replace(
                 record, state=JobState.FAILED,

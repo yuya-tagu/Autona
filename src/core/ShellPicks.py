@@ -77,6 +77,9 @@ class ShellPicks:
     """See the module docstring. One per process (bootstrap: core makes it,
     the shell holds, the plugin routes resolve)."""
 
+    # The one bootstrap_core() makes (ADR-009 E.1); None until then.
+    instance = None
+
     def __init__(self, *, clock: Callable[[], float] = time.monotonic,
                  newId: Callable[[], str] = lambda: secrets.token_urlsafe(16)):
         self._clock = clock

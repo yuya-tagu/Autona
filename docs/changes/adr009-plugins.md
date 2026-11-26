@@ -24,13 +24,13 @@
 - [x] L5 `MatchLogService` の match_decided 判定（L3 の golden より先にマージ）
 - [x] L3 `PluginSecrets`（DPAPI）＋`PluginInputs`（入力源 6 つ）
 - [x] L2 `PluginRegistry`（マニフェスト検査・B.4・開発中フォルダ）
-- [ ] L1 `PluginRunner`（新規。CREATE_SUSPENDED・優先度上限・timed_out・環境変数の引き算）
+- [x] L1 `PluginRunner`（新規。CREATE_SUSPENDED・優先度上限・timed_out・環境変数の引き算）
 - [x] L8 `PluginJobs`（request.json・ジョブフォルダ・成果物の検査・保持・busy・起動時の後始末）
 - [x] L9 `PluginHooks`（保留・2 つの窓・自動無効。時計を注入）
-- [ ] L4 `PluginInstaller` の部品（共有の zip 検査を新規に・配布元の判定表・同意ダイジェスト・遮断の解釈）
-- [ ] L11 v1 ハンドラ（新規モジュール。登録は配線で）
-- [ ] L12 SDK `autona_plugin.py` を本体内に（偽ホストを本体の pytest で実エンジンと照合）
-- [ ] L6 web: plugins ページ・フォーム部品・進捗部品の共通化（モック。#389 マージ済み）→ 続けて L10 シェル要求 `pickFile` / `openPluginLink`
+- [x] L4 `PluginInstaller` の部品（共有の zip 検査を新規に・配布元の判定表・同意ダイジェスト・遮断の解釈）
+- [x] L11 v1 ハンドラ（新規モジュール。登録は配線で）
+- [x] L12 SDK `autona_plugin.py` を本体内に（偽ホストを本体の pytest で実エンジンと照合）
+- [x] L6 web: plugins ページ・フォーム部品・進捗部品の共通化（モック。#389 マージ済み）→ 続けて L10 シェル要求 `pickFile` / `openPluginLink`
 
 ## W2 以降 配線（メイン・直列）
 - [ ] I1a 生成順・ルート・区分（ナビに出さない）→ I1b ページ登録＋I2 vodsplit の載せ替え（並行。`test_plugin_contract` の ArchiveWorker の文字列一致と `_EndState` の突き合わせを PluginRunner 側へ書き換える）→ **M1**（P1+P2）実機・exe 1 回

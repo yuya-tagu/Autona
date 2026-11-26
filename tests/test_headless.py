@@ -67,6 +67,10 @@ os.makedirs("user_data/games/probe_game/base_files/icon", exist_ok=True)
 with open("user_data/settings.json", "w", encoding="utf-8") as f:
     json.dump({"general": {"webserver_port": port,
                            "webserver_listen_lan": False},
+               # The work folder inside the throwaway directory (the
+               # launch's plugin sweep reads it): tests/conftest.py
+               # isolated_settings.
+               "archive": {"work_dir": os.path.abspath("work")},
                "SELECTED_GAME_CODENAME": "probe_game"}, f)
 with open("user_data/games/probe_game/base_files/config.json", "w",
           encoding="utf-8") as f:

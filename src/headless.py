@@ -174,6 +174,7 @@ class HeadlessShell:
         from .core.MatchLogService import MatchLogService
         from .core.PluginJobs import PluginJobs
         from .core.PluginRunner import PluginRunner
+        from .core.PluginTypes import SHUTDOWN_GRACE_SECONDS
         from .core.StateManager import StateManager
         from .core.StatePersistence import StatePersistence
         from .core.TaskExecutor import TaskExecutor
@@ -197,11 +198,18 @@ class HeadlessShell:
         # The plugin runs (ADR-009 E.2), at the archive's place and short
         # for the same reason: each run cancelled, ended past the grace
         # (PluginJobs.Shutdown, its own runs only), then the runner refuses
-        # any launch and ends what is left. Headless starts none (their
-        # routes are SHELL: 403, and no hook runs), so this is quick.
+        # any launch and ends what is left. The waits are one after another
+        # (at worst 2 s here and the runner's 2 s for a killed run), which
+        # would not fit the console close's five seconds with the archive's
+        # -- but headless starts no run (their routes are SHELL: 403, and no
+        # hook runs here), so both return at once. Each in its own try.
         try:
             if PluginJobs.instance is not None:
-                PluginJobs.instance.Shutdown(2.0)
+                PluginJobs.instance.Shutdown(
+                    float(SHUTDOWN_GRACE_SECONDS["headless"]))
+        except Exception:
+            logger.error(traceback.format_exc())
+        try:
             if PluginRunner.instance is not None:
                 PluginRunner.instance.Shutdown(0.0)
         except Exception:

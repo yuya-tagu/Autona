@@ -821,17 +821,27 @@ class Window(QMainWindow):
         # runner refuses any launch and ends what is left -- a dev plugin's
         # describe on a request thread the server's stop does not drain;
         # the runs are already their owners' to have stopped (the archive's
-        # above, PluginJobs').
+        # above, PluginJobs'). The waits are one after another: at worst the
+        # archive's 5 s, the runs' 5 s and the runner's wait for a killed
+        # run to end (PluginRunner.KILL_WAIT_SECONDS, 2 s) -- 12 s, inside
+        # the close watchdog's 60. Each in its own try, so a failure of the
+        # runs' stop still has the runner refuse and end what is left.
+        from .core.PluginJobs import PluginJobs
+        from .core.PluginRunner import PluginRunner
+        from .core.PluginTypes import SHUTDOWN_GRACE_SECONDS
         try:
-            from .core.PluginJobs import PluginJobs
-            from .core.PluginRunner import PluginRunner
             if PluginJobs.instance is not None:
-                PluginJobs.instance.Shutdown(5.0)
+                PluginJobs.instance.Shutdown(
+                    float(SHUTDOWN_GRACE_SECONDS["desktop"]))
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error stopping the plugin runs on shutdown")
+        try:
             if PluginRunner.instance is not None:
                 PluginRunner.instance.Shutdown(0.0)
         except Exception:
             logger.opt(exception=True).error(
-                "Error stopping the plugin runs on shutdown")
+                "Error stopping the plugin runner on shutdown")
 
         # The background tasks (ADR-005 S3f): after the web server, so no
         # request can queue one any more; before the interpreter's exit join

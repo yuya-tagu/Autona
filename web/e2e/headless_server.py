@@ -46,7 +46,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.AutonaDesignerService import AutonaDesignerService  # noqa: E402
-from tests.conftest import _LINKED_TREES, _link_tree  # noqa: E402
+from tests.conftest import (  # noqa: E402
+    _LINKED_TREES, _link_tree, isolated_settings)
 from tests.test_bootstrap_split import (  # noqa: E402
     SHIPPED_TEMPLATE_LINKS, _free_port, _runtime)
 from tests.test_headless_smoke import (  # noqa: E402
@@ -163,6 +164,7 @@ def serve(console_copy=None):
                 _write_designer_project(cwd)
                 port = _free_port()
                 (cwd / "user_data" / "settings.json").write_text(json.dumps({
+                    **isolated_settings(cwd),
                     "general": {"webserver_port": port,
                                 "webserver_listen_lan": False}}),
                     encoding="utf-8")
