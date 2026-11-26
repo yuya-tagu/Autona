@@ -79,6 +79,11 @@ DEV_FOLDER_ID_PATTERN = r"^[0-9a-f]{12}$"
 RESERVED_ENTRY_PREFIX = "@"
 # What an invalid error.code becomes.
 FALLBACK_ERROR_CODE = "error"
+# The official plugin repositories' numeric GitHub ids (D7: a taguyan. id
+# installs only from these; PluginRegistry.Check's id_reserved and
+# PluginInstaller.DecideSource share it). Empty until the first official
+# plugin repository exists.
+OFFICIAL_REPO_IDS: frozenset = frozenset()
 
 
 # ── limits (contract_1.json "limits") ───────────────────────────────────
@@ -419,11 +424,18 @@ class HookOutcome(StrEnum):
 
 
 class HookDisabledReason(StrEnum):
+    """Why a hook is off (HookStatus.disabled_reason; contract_1.json
+    hooks.disabled_reasons_note). USER is the user's; RATE_LIMIT, FAILURES
+    and PARAMS_CHANGED the dispatcher's own, per hook; the rest a reason
+    PluginHooks.Forget is given, for every hook of the plugin."""
     USER = "user"
     RATE_LIMIT = "rate_limit"
     FAILURES = "failures"
     RECONSENT = "reconsent"
     NEW_INSTALL = "new_install"
+    BLOCKED = "blocked"
+    REMOVED = "removed"
+    PARAMS_CHANGED = "params_changed"
 
 
 class InstallDecision(StrEnum):
@@ -433,6 +445,42 @@ class InstallDecision(StrEnum):
     NEW_INSTALL = "new_install"
     REFUSE_DEV_ID = "refuse_dev_id"
     REFUSE_RESERVED = "refuse_reserved"
+
+
+class InstallSourceKind(StrEnum):
+    """install.json ``source.kind``: what an installed plugin came from
+    (C.3). A dev folder and the built-in have no install.json."""
+    GITHUB = "github"
+    MANUAL = "manual"
+
+
+class ZipProblem(StrEnum):
+    """PluginInstaller.CheckZip's codes (C.1 / C.7; contract_1.json
+    install.zip_problems): the zip's own rules first, then the plugin's
+    layout and the release descriptor."""
+    ZIP_UNREADABLE = "zip_unreadable"
+    TOO_MANY_ENTRIES = "too_many_entries"
+    EXPANDED_TOO_LARGE = "expanded_too_large"
+    UNSAFE_PATH = "unsafe_path"
+    BAD_NAME = "bad_name"
+    NOT_ASCII = "not_ascii"
+    RESERVED_NAME = "reserved_name"
+    LINK = "link"
+    ENCRYPTED = "encrypted"
+    DUPLICATE_NAME = "duplicate_name"
+    PATH_TOO_LONG = "path_too_long"
+    ZIP_TOO_LARGE = "zip_too_large"
+    DESCRIPTOR_INVALID = "descriptor_invalid"
+    SIZE_MISMATCH = "size_mismatch"
+    SHA256_MISMATCH = "sha256_mismatch"
+    NOT_ONE_FOLDER = "not_one_folder"
+    FOLDER_NOT_ID = "folder_not_id"
+    MANIFEST_MISSING = "manifest_missing"
+    MANIFEST_UNREADABLE = "manifest_unreadable"
+    ID_MISMATCH = "id_mismatch"
+    VERSION_MISMATCH = "version_mismatch"
+    ENTRY_OUTSIDE = "entry_outside"
+    ENTRY_MISSING = "entry_missing"
 
 
 # ── the manifest (plugin.json) ──────────────────────────────────────────
@@ -489,10 +537,12 @@ class Hook:
 
 @dataclass(frozen=True)
 class Job:
+    """``timeout_seconds`` None is no time limit: a built-in job's only
+    (vodsplit); a manifest's job always has one (the schema)."""
     id: str
     title: Text
     lane: str
-    timeout_seconds: int
+    timeout_seconds: Optional[int]
     memory_mb: Optional[int] = None
     params: Tuple[Field, ...] = ()
     manual: bool = True
@@ -731,10 +781,11 @@ class LaunchSpec:
     <request.json>`` (a built-in worker's own arguments for vodsplit);
     ``env`` is BuildEnvironment's; ``timeout_seconds`` None is no limit
     (vodsplit); ``memory_mb`` is enforced on the light lane only.
-    ``log_path`` is the run's worker.log."""
+    ``log_path`` is the run's worker.log. ``env`` holds the secrets: it is
+    left out of the repr."""
     argv: Tuple[str, ...]
     cwd: str
-    env: Mapping[str, str]
+    env: Mapping[str, str] = field(repr=False)
     lane: Lane
     log_path: str
     timeout_seconds: Optional[int] = None
@@ -877,9 +928,9 @@ class HookStatus:
 
 @dataclass(frozen=True)
 class InstallSource:
-    """Where an install came from (install.json ``source``): ``github``
-    with the numeric ``repo_id`` (and the display name), ``manual``, or
-    ``dev`` / ``builtin`` for what is not installed."""
+    """Where an install came from (install.json ``source``): ``kind`` an
+    InstallSourceKind value -- ``github`` with the numeric ``repo_id`` and
+    the ``owner/repo`` name it had (display only), or ``manual`` (neither)."""
     kind: str
     repo_id: Optional[int] = None
     name: Optional[str] = None
@@ -887,11 +938,14 @@ class InstallSource:
 
 @dataclass(frozen=True)
 class InstallRecord:
-    """user_data/plugins/<id>/install.json."""
+    """user_data/plugins/<id>/install.json (contract_1.json
+    install.record): ``sha256`` the installed zip's, ``installed_at`` ISO
+    8601 with offset (seconds), written by the installer."""
     source: InstallSource
     version: str
     sha256: Optional[str]
     consent_digest: str
+    installed_at: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -918,6 +972,13 @@ class RunHandle(Protocol):
         """Ask the run to stop: the job's priority back to NORMAL, write
         ``cancel\\n``, close stdin; after CANCEL_GRACE_SECONDS kill the job
         object. Idempotent."""
+
+    def Kill(self) -> None:
+        """Kill this run's job object now (the run and every descendant in
+        it; no other run): the shutdown's end after its grace (E.2), when a
+        caller must not wait for CANCEL_GRACE_SECONDS. The end is decided
+        and onEnd called as usual (a cancel requested before counts).
+        Idempotent; nothing when it has ended."""
 
     def Wait(self, timeout: Optional[float] = None) -> Optional[RunOutcome]:
         """The outcome once ended, None if still running after
@@ -986,11 +1047,15 @@ class PluginRegistry(Protocol):
         with one id (the later one is refused)."""
 
     def Check(self, raw: Any, folder: str, source: Optional[InstallSource],
-              *, dev: bool, hostVersion: str) -> ManifestReport:
+              *, dev: bool, hostVersion: str,
+              expectedId: Optional[str] = None) -> ManifestReport:
         """Check a parsed plugin.json (``raw``: what json.loads gave) in
-        ``folder`` (absolute: the id against its name, ``entry`` / ``icon``
-        inside it and existing) coming from ``source`` (the taguyan.
-        reservation; None for the built-in). Touches no file but those."""
+        ``folder`` (absolute: ``entry`` / ``icon`` inside it and existing)
+        coming from ``source`` (the taguyan. reservation against
+        OFFICIAL_REPO_IDS; None for the built-in). ID_FOLDER_MISMATCH: the
+        id against ``expectedId`` -- the installer's, for a ``<id>.new``
+        folder -- else the folder's name; never for a dev folder. Touches no
+        file but those."""
 
     def JudgeDescribe(self, run: DescribeRun,
                       manifest: Manifest) -> DescribeResult:
@@ -1012,17 +1077,32 @@ class PluginRegistry(Protocol):
         """(plugin id, job) of every usable job with a hook on ``event``."""
 
     def DevFolders(self) -> Sequence[DevFolder]:
-        """The dev folders (dev.json's, then AUTONA_PLUGIN_DEV's)."""
+        """The dev folders (dev.json's -- also while the toggle is off --
+        then AUTONA_PLUGIN_DEV's)."""
 
-    def SetDevMode(self, on: bool) -> None:
-        """The developer toggle (dev.json)."""
+    def DevFolderActive(self, folderId: str) -> bool:
+        """Whether the dev folder is scanned (dev.json's while the toggle
+        is on; AUTONA_PLUGIN_DEV's always)."""
+
+    def RefusedFolders(self) -> Sequence[Tuple[str, Tuple[ManifestProblem,
+                                                         ...]]]:
+        """(folder, problems) of each folder whose id another plugin owns
+        (ID_TAKEN). Not list rows (a row's id names one plugin): the page
+        shows them beside the list."""
+
+    def SetDevMode(self, on: bool) -> Optional[Refused]:
+        """The developer toggle (dev.json); UNAVAILABLE when dev.json
+        cannot be written."""
 
     def AddDevFolder(self, path: str) -> Union[DevFolder, Refused]:
-        """Add a dev folder; ID_TAKEN when an installed plugin has its
-        id."""
+        """Add a dev folder: ID_TAKEN when another plugin has its id,
+        INVALID_REQUEST when it is not a folder or is an installed one,
+        UNAVAILABLE when dev.json cannot be written."""
 
-    def RemoveDevFolder(self, folderId: str) -> bool:
-        """Remove dev.json's folder ``folderId`` (the folder stays)."""
+    def RemoveDevFolder(self, folderId: str) -> Union[bool, Refused]:
+        """Remove dev.json's folder ``folderId`` (the folder stays): False
+        when it is not dev.json's, UNAVAILABLE when dev.json cannot be
+        written."""
 
     def Reload(self, pluginId: str) -> Optional[DescribeResult]:
         """A dev plugin's reload: its manifest again, then describe."""
@@ -1061,7 +1141,8 @@ class PluginSecrets(Protocol):
 
     def Set(self, pluginId: str, key: str, value: str, *,
             dev: bool) -> None:
-        """Save one secret (no line break, up to SECRET_MAX_LENGTH)."""
+        """Save one secret: 1 to SECRET_MAX_LENGTH characters, no line
+        break, NUL or other control character (Unicode category Cc)."""
 
     def Delete(self, pluginId: str, key: str, *, dev: bool) -> None:
         """Clear one secret."""
@@ -1101,11 +1182,19 @@ class PluginJobs(Protocol):
     checks, keeping the newest RUNS_KEPT_PER_PLUGIN manual / action runs,
     the launch's sweep (running -> failed / autona_exited).
 
+    Owns both lanes: another owner (the built-in vodsplit, run by
+    ArchiveJobService, on the heavy one) takes one with Claim and gives it
+    back with Release.
+
     Made with two callbacks (constructor arguments, called outside its
-    lock, on the thread that ended the run): ``onRunEnded(record:
-    RunRecord)`` for every run's end (PluginHooks.RunEnded for a hook's)
-    and ``onLaneFreed(lane: Lane)`` when a lane becomes free
-    (PluginHooks.LaneFreed for the light one).
+    lock, on the thread that ended the run or released the claim):
+    ``onRunEnded(record: RunRecord)`` for every run's end
+    (PluginHooks.RunEnded for a hook's) and ``onLaneFreed(lane: Lane)``
+    when a lane becomes free (PluginHooks.LaneFreed for the light one).
+    **Start never calls them**: a start refused after its lane was reserved
+    gives the lane back without onLaneFreed (a hook held meanwhile waits
+    for the next free lane), and a run cancelled while being prepared is
+    returned by Start ended (CANCELLED) without onRunEnded.
 
     A hook's run: its job folder is removed when it ends, except the last
     failed one of each hook (request.json and worker.log kept for 'see the
@@ -1118,11 +1207,23 @@ class PluginJobs(Protocol):
               picks: Mapping[str, InputPick]) -> Union[RunRecord, Refused]:
         """Start a run (manual, action or hook) or say why not. ``params``
         are the job's value fields (file / folder already resolved paths),
-        ``settings`` PluginSettings.Get's."""
+        ``settings`` PluginSettings.Get's. Calls neither callback (above);
+        a run cancelled while being prepared comes back as its record,
+        CANCELLED. UNAVAILABLE after Shutdown, or when the host cannot write
+        the run's folder (detail)."""
 
     def BusyFor(self, lane: Lane) -> Optional[Refused]:
         """BUSY (with the remaining time when known) if ``lane`` is full,
         None when free."""
+
+    def Claim(self, lane: Lane, owner: str) -> bool:
+        """Take ``lane`` for ``owner`` (a plugin id: the built-in vodsplit
+        on the heavy one): True when it was free, False when full or after
+        Shutdown. Running(owner) is True while it holds it."""
+
+    def Release(self, lane: Lane, owner: str) -> None:
+        """Give back ``owner``'s claim of ``lane`` (nothing when it holds
+        none); onLaneFreed on the caller's thread."""
 
     def Running(self, pluginId: str) -> bool:
         """Whether a run of the plugin is going (update, removal)."""
@@ -1149,7 +1250,10 @@ class PluginJobs(Protocol):
         """At launch: runs left running -> FAILED (AUTONA_EXITED)."""
 
     def Shutdown(self, grace: float) -> None:
-        """The shells' close: cancel both lanes, ``grace`` seconds, kill."""
+        """The shells' close: refuse new starts and claims, cancel this
+        module's runs, wait up to ``grace`` seconds, then RunHandle.Kill
+        the ones still running. A claimed lane is its owner's to stop (never
+        the runner's Shutdown: it would stop vodsplit too)."""
 
 
 class PluginHooks(Protocol):
@@ -1161,27 +1265,36 @@ class PluginHooks(Protocol):
     state."""
 
     def Start(self) -> None:
-        """Start the dispatcher thread."""
+        """Read the enabled hooks and start the dispatcher thread (not
+        headless)."""
 
     def Shutdown(self) -> None:
-        """Stop it and drop what is pending; no start after it."""
+        """Stop it and drop what is pending; no start after it. Not called
+        holding StateManager.lock."""
+
+    def Refresh(self) -> None:
+        """Read the hooks' records again (after the registry's Scan -- not
+        from inside it, nor holding its lock or StateManager.lock)."""
 
     def Wanted(self, event: HookEvent) -> bool:
         """Whether any enabled hook is on ``event`` (else the trigger is
-        not queued at all)."""
+        not queued at all). Called inside StateManager.lock: no I/O, leaf
+        locks only."""
 
     def MatchCandidate(self, recordId: str,
                        line: Mapping[str, Any]) -> None:
-        """match_decided's candidate (inside StateManager.lock: only
-        queues). Fires MATCH_DECIDED_HOLD_SECONDS after the record's first
+        """match_decided's candidate. Called inside StateManager.lock: no
+        I/O, leaf locks only (it only queues). Fires
+        MATCH_DECIDED_HOLD_SECONDS after the record's first
         candidate unless withdrawn; called again for the same record before
         that, it replaces the line only (the wait is not restarted). The
         dispatcher keeps the 'fired' mark per record: a candidate of a
         record that fired is ignored."""
 
     def MatchWithdrawn(self, recordId: str) -> None:
-        """The candidate no longer holds (inside StateManager.lock: only
-        queues): the wait is cancelled, the record is not marked fired."""
+        """The candidate no longer holds. Called inside StateManager.lock:
+        no I/O, leaf locks only (it only queues). The wait is cancelled,
+        the record is not marked fired."""
 
     def ResultImageSaved(self, path: str) -> None:
         """One result image saved to out/results (only queues)."""
@@ -1195,15 +1308,31 @@ class PluginHooks(Protocol):
 
     def SetEnabled(self, pluginId: str, hookKey: str, enabled: bool,
                    params: Mapping[str, Any]) -> Union[HookStatus, Refused]:
-        """Enable (with the values it runs with) or disable a hook."""
+        """Enable (with the values it runs with; a file / folder value as a
+        pick id) or disable a hook."""
 
     def Status(self, pluginId: str) -> Sequence[HookStatus]:
         """The plugin's hooks."""
 
     def Forget(self, pluginId: str,
                reason: HookDisabledReason) -> None:
-        """Disable every hook of the plugin and drop its pending ones
-        (new install, reconsent, removal, block)."""
+        """Disable every hook of the plugin and drop its pending ones, for
+        ``reason``: NEW_INSTALL (values back to the defaults, failures 0,
+        history and last error cleared: another plugin now), RECONSENT
+        (values back to the defaults, failures 0), BLOCKED, REMOVED (before
+        its user_data folder is removed). Not for a plugin's disable: its
+        pending hooks are discarded when they would start (DISABLED).
+        PARAMS_CHANGED is the dispatcher's own, per hook: a saved value no
+        longer fits the job (an update changed its fields), or the start
+        was refused INVALID_REQUEST."""
+
+    def TrySample(self, pluginId: str,
+                  hookKey: str) -> Union[RunRecord, Refused]:
+        """A dev plugin's 'try with the sample input' (D.6): one start with
+        the golden input of the hook's event (contract_1.json field_types
+        source[].golden), counted in neither window nor the failures.
+        INVALID_REQUEST for a plugin that is not a dev one; UNAVAILABLE
+        without the sample file, headless or after Shutdown."""
 
 
 class PluginInstaller(Protocol):
@@ -1213,15 +1342,15 @@ class PluginInstaller(Protocol):
 
     def CheckZip(self, zipPath: str,
                  descriptor: Optional[Mapping[str, Any]]) -> Sequence[str]:
-        """The zip's problems (empty when fine): the C.1 rules, and the
-        release descriptor (autona-plugin.json) when given. The codes are
-        the installer's own."""
+        """The zip's problems (ZipProblem values; empty when fine): the C.1
+        rules, and the release descriptor (autona-plugin.json) when
+        given."""
 
     def DecideSource(self, pluginId: str,
                      installed: Optional[InstallRecord],
                      incoming: InstallSource, incomingVersion: str, *,
                      devIdExists: bool) -> InstallDecision:
-        """The C.3 table (taguyan. against the official repo ids). Pure."""
+        """The C.3 table (taguyan. against OFFICIAL_REPO_IDS). Pure."""
 
     def ConsentDigest(self, manifest: Manifest,
                       source: InstallSource) -> str:
@@ -1238,7 +1367,30 @@ class PluginInstaller(Protocol):
         """Remove a plugin (C.6): ``runs`` is delete / keep_out / keep."""
 
     def Sweep(self) -> None:
-        """At launch: the swaps' leftovers (.new / .old)."""
+        """At launch: the swaps' leftovers (.new / .old / .part)."""
+
+
+class ReleaseNetwork(Protocol):
+    """GitHub as C.3 reads it, given to PluginInstaller (the wiring makes
+    it; it is never called with a lock held). Any exception is a network
+    failure."""
+
+    def RepoName(self, repoId: int) -> str:
+        """``GET api.github.com/repositories/<repoId>`` -> its
+        ``owner/repo`` now."""
+
+    def RepoId(self, name: str) -> int:
+        """``GET api.github.com/repos/<name>`` -> its numeric id."""
+
+    def LatestDescriptor(self, name: str) -> bytes:
+        """``https://github.com/<name>/releases/latest/download/
+        autona-plugin.json`` (at most RELEASE_DESCRIPTOR_MAX_BYTES)."""
+
+    def Download(self, name: str, tag: str, zipName: str, target: str,
+                 size: int) -> None:
+        """``https://github.com/<name>/releases/download/<tag>/<zipName>``
+        to ``target`` (``<id>.part``; resumed when it is there), ``size``
+        bytes."""
 
 
 # What a run's job folder holds (contract_1.json manifest_paths.job_files).

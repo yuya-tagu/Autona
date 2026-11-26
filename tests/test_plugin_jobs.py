@@ -92,10 +92,14 @@ class FakeHandle:
     def __init__(self):
         self.pid = 4242
         self.cancels = 0
+        self.kills = 0
         self.outcome = None
 
     def Cancel(self):
         self.cancels += 1
+
+    def Kill(self):
+        self.kills += 1
 
     def Wait(self, timeout=None):
         return self.outcome
@@ -349,6 +353,8 @@ def test_the_launch_spec(env):
     assert spec.timeout_seconds == 60 and spec.memory_mb == 256
     assert spec.env["AUTONA_PLUGIN_DIR"] == str(env.folder)
     assert spec.env["AUTONA_SECRET_TOKEN"] == SECRET
+    # The environment holds the secrets: never in a repr (a log line).
+    assert SECRET not in repr(spec)
     # autona_api none: no API URL.
     assert "AUTONA_API_URL" not in spec.env
     env.End(0, _Done())
@@ -854,7 +860,9 @@ def test_shutdown_cancels_its_runs_only(env):
     light.outcome = RunOutcome(state=JobState.CANCELLED)
     _, log = _Logged(lambda: env.jobs.Shutdown(0.0))
     assert light.cancels == 1 and heavy.cancels == 1
-    # The runner's Shutdown would stop runs that are not this module's.
+    # The one still running after the grace is killed by its own handle;
+    # the runner's Shutdown would stop runs that are not this module's.
+    assert light.kills == 0 and heavy.kills == 1
     assert env.runner.shutdowns == []
     assert "1 run(s) still running" in log
     assert env.StartPost().reason is StartRefusal.UNAVAILABLE

@@ -135,7 +135,7 @@ vodsplit との互換は**イベント・stdin・終了コードの層**の互�
 URL は `https://` だけ・userinfo なし・2,048 字までを確かめる。ページは URL を渡さないので、今の `openExternal` の「URL を受けない」規則を保てる。
 
 **開発者の入口**:
-- プラグインのページの「開発者向け」のトグルの下に「開発中のフォルダを追加」（SHELL・`pickFolder`）。トグルとフォルダの一覧は `user_data\plugins\dev.json`（v1 の設定ルートに出さないので LAN の WRITE からは届かない）。環境変数 `AUTONA_PLUGIN_DEV`（`;` 区切りで複数）も読む
+- プラグインのページの「開発者向け」のトグルの下に「開発中のフォルダを追加」（SHELL・`pickFolder`）。トグルとフォルダの一覧は `user_data\plugins\dev.json`（`{"enabled": 真偽, "folders": [絶対パス, …]}`。v1 の設定ルートに出さないので LAN の WRITE からは届かない）。環境変数 `AUTONA_PLUGIN_DEV`（`;` 区切りで複数）も読む
 - トグルを入れる時と、フォルダを足す時に確認を出す。文は D6 の固定文に「開発中のフォルダのプログラムは、ハッシュの確認も同意もなしで動きます。自分で書いた物だけを足してください」を足した物
 - **導入済みと同じ id の開発中フォルダは断る**（「同じ id のプラグインが入っています。先に削除するか、id を変えてください」）。逆に、開発中と同じ id の導入も断る。開発中の状態（設定・`secret`・フック）は `user_data\plugins\_dev\<id>\` に分け、導入済みとは何も共有しない
 - 開発中のプラグインは一覧で名前より前に「開発中」と出す。ハッシュと同意を飛ばし、`entry` に任意のコマンド（`["python", "main.py"]`）を許し、遮断の対象外。フックの行に「サンプルの入力で試す」を出し、終わったジョブの `inputs\` を残す（再現用）
@@ -586,7 +586,7 @@ URL は `https://` だけ・userinfo なし・2,048 字までを確かめる。�
 | `select` | 選択 | `options: [{"value": 文字列, "label": 文言}]` の `value`（100 件まで） |
 | `file` | ファイル選択（`pickFile`） | 絶対パス。`extensions: ["png", "jpg"]`（小文字・点なし・必須）。UNC は拒否。保存した値はファイル名だけを画面に出す |
 | `folder` | フォルダ選択（`pickFolder`） | 絶対パス。UNC は拒否 |
-| `secret` | 伏せ字（`settings` だけ） | 値は DPAPI（CurrentUser）で `user_data\plugins\<id>\secrets.bin`。環境変数 `AUTONA_SECRET_<KEY の大文字>` だけで渡す。改行なし・4,096 字まで。画面は「設定済み」だけ。プラグインから書き戻せない |
+| `secret` | 伏せ字（`settings` だけ） | 値は DPAPI（CurrentUser）で `user_data\plugins\<id>\secrets.bin`。環境変数 `AUTONA_SECRET_<KEY の大文字>` だけで渡す。1〜4,096 字で、改行・NUL ほかの制御文字（Unicode の Cc）を含まない（含めば `invalid_request`。空は消す操作で行う）。画面は「設定済み」だけ。プラグインから書き戻せない |
 
 入力源の型（ホストが `inputs\` に置き、`request.json` の `inputs` に書く。中身は B.5）:
 
@@ -597,7 +597,7 @@ URL は `https://` だけ・userinfo なし・2,048 字までを確かめる。�
 | `state` | 1 | 公開済み state の写し（`out/program_state.json` と同じ形） | 選ばない。押した時の物（手動も同じ） |
 | `result_image` | 1 | リザルト画像 1 枚（png / jpg）＋ `sha256` | `out/results` の一覧（新しい 30 枚）から |
 | `thumbnail_image` | 1 | 試合サムネイル 1 枚＋ `sha256` | 生成済みの一覧から |
-| `archive_export` | 1 | 切り抜きの書き出しの一覧（JSON。クリップ本体は元のパス）。形は P3 で YouTube の ADR の要件を見て固め、プレビューの間に決める | 文脈専用 |
+| `archive_export` | 1 | 切り抜きの書き出しの一覧（JSON。クリップ本体は元のパス）。今の形は `{"job", "clips_dir", "clips": [{"no", "path", "file", "title", "start", "end"}]}`（`contract_1.json` の `shape`）。P3 で YouTube の ADR の要件を見て欄を足し、プレビューの間に固める | 文脈専用 |
 
 - 選手 DB は渡さない。入力源はどれも選手名を含みうる（同意の画面にそう書く）。`state` には本名・X のアカウントの欄も含まれる
 - リザルト画像とサムネイルはデスクトップ専用の機能なので、ヘッドレスでは選べない
@@ -653,7 +653,7 @@ URL は `https://` だけ・userinfo なし・2,048 字までを確かめる。�
            {"c1": "<codename>", "c2": "<codename>", "at": "2026-11-26T21:58:40+09:00"}]}
 ```
 
-- `match_log` は 1 試合につき変わるたびに 1 行を足すので、同じ `id` の**最後の行**がその試合の記録。ホストは選んだ日付・大会の行をそのまま渡す（まとめない）
+- `match_log` は 1 試合につき変わるたびに 1 行を足すので、同じ `id` の**最後の行**がその試合の記録。ホストは選んだ日付・大会の行をそのまま渡す（まとめない）。JSON のオブジェクトとして読めない行（異常終了で切れた行）だけは落とす
 - 1 行の例（`post_match` の `short`）: `{round} {p1} {score[0]}-{score[1]} {p2}`
 
 **`state`**: `out/program_state.json` と同じ形。よく使う場所:
@@ -730,7 +730,7 @@ example.webhook-post-1.0.0-windows-x64.zip
 3. `https://github.com/<名前>/releases/download/<tag>/<zip.name>` をダウンロード（`.part` で再開）→ サイズと SHA-256
 4. `plugins\<id>.new\` に展開して zip を検査 → `plugin.json` を読む
 5. **同意の画面**（名前・id・版・作者・配布元・SHA-256 の先頭・導入後のサイズ・ライセンス・印・固定の文・作者の申告・渡すデータ・フック（既定無効））。断ったら `.new` を消す
-6. `describe`（`.new` の場所で 60 秒）→ swap（失敗したら戻す）→ `user_data\plugins\<id>\install.json` に配布元（`{"kind": "github", "repo_id": …, "name": …}`）・zip の SHA-256・同意のダイジェストを記録
+6. `describe`（`.new` の場所で 60 秒）→ swap（失敗したら戻す）→ `user_data\plugins\<id>\install.json` に `{"source": {"kind": "github", "repo_id": …, "name": …}, "version", "sha256"（zip の SHA-256）, "consent_digest", "installed_at"}` を記録（手動は `"source": {"kind": "manual"}`）
 
 **手動の zip**: SHELL のアップロード（今のゲームアセットの zip の取り込みと同じ型。Content-Length 必須・上限は C.1 の zip の大きさ）。4 からは同じ。同意の画面に「この zip の出所を Autona は確かめられません。作者のページの SHA-256 と見比べてください」と計算した値を出す。
 
@@ -842,9 +842,9 @@ example.webhook-post-1.0.0-windows-x64.zip
 
 - フックのキーは `<job の id>/<on>`。有効 / 無効・保存した値・保留・回数・失敗の数・履歴は全部このキーごと
 - 有効にする時、そのジョブの値の項目（入力源以外）のフォームを `default` を初期値にして出し、利用者が確かめて保存する。保存した値は `user_data\plugins\<id>\hooks.json` に置き、フックはこの値で走る
-- 再同意でそのジョブの値の項目が変わったら、そのフックを無効にし、値を `default` に戻して確かめ直してもらう
+- 再同意でそのジョブの値の項目が変わったら、そのフックを無効にし、値を `default` に戻して確かめ直してもらう。契約 1 では再同意のときプラグインのフックを全部無効にする（理由 `reconsent`）。再同意なしの更新で保存した値が項目に合わなくなったら、起動の直前にそのフックだけを無効にする（理由 `params_changed`）
 - フックで起動したジョブのフォルダは終わったら消す。履歴はフックごとに新しい 20 件（時刻・状態・`summary`・理由）。**最後に失敗した 1 件だけはフォルダ（`request.json`・`worker.log`）を残し**、フックの行から「ログを見る」で開ける（自動無効の理由を作者も利用者も追えるように）。次に失敗したら入れ替える
-- 開発中のプラグインは、フックの行の「サンプルの入力で試す」で、golden の入力を使って 1 回起動できる（回数と失敗には数えない）
+- 開発中のプラグインは、フックの行の「サンプルの入力で試す」で、golden の入力を使って 1 回起動できる（回数と失敗には数えない）。`result_image_saved` の入力は代わりの小さな画像（`docs/plugins/inputs/result_image.png`）
 
 ### D.7 走らない時
 

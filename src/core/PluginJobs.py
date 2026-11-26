@@ -563,7 +563,8 @@ class _Plan:
     protocol: int
     lane: Lane
     trigger: Trigger
-    timeout: int
+    # None: no time limit (a built-in job's only).
+    timeout: Optional[int]
     argv: Tuple[str, ...]
     params: dict
     settings: dict
@@ -941,7 +942,8 @@ class PluginJobs:
 
         timeout = job.timeout_seconds
         if trigger.kind is TriggerKind.HOOK:
-            timeout = min(timeout, HOOK_TIMEOUT_CAP_SECONDS)
+            timeout = (HOOK_TIMEOUT_CAP_SECONDS if timeout is None
+                       else min(timeout, HOOK_TIMEOUT_CAP_SECONDS))
         return _Plan(pluginId=pluginId, job=job, manifest=manifest,
                      folder=plugin.folder, dev=dev, protocol=protocol,
                      lane=lane, trigger=trigger, timeout=timeout, argv=argv,
@@ -1533,10 +1535,9 @@ class PluginJobs:
     def Shutdown(self, grace: float) -> None:
         """Refuse new starts and claims, cancel this module's runs (waiting
         for one being launched to get its handle), wait up to ``grace``
-        seconds for them. What is still running afterwards is left to each
-        handle's own kill after CANCEL_GRACE_SECONDS: RunHandle has no kill
-        of its own, and the runner's Shutdown would stop runs that are not
-        this module's (vodsplit's). A claimed lane is its owner's."""
+        seconds for them, then kill the ones still running, each by its own
+        handle (RunHandle.Kill): the runner's Shutdown would stop runs that
+        are not this module's (vodsplit's). A claimed lane is its owner's."""
         deadline = time.monotonic() + max(0.0, grace)
         with self._launched:
             self._closing = True
@@ -1551,10 +1552,10 @@ class PluginJobs:
             handles = [run.handle for run in runs if run.handle is not None]
         for handle in handles:
             handle.Cancel()
-        left = 0
-        for handle in handles:
-            if handle.Wait(max(0.0, deadline - time.monotonic())) is None:
-                left += 1
+        left = [handle for handle in handles
+                if handle.Wait(max(0.0, deadline - time.monotonic())) is None]
+        for handle in left:
+            handle.Kill()
         if left:
-            logger.warning(f"Plugins: {left} run(s) still running after the "
-                           f"shutdown grace")
+            logger.warning(f"Plugins: {len(left)} run(s) still running after "
+                           f"the shutdown grace: killed")

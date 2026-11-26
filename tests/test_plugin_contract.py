@@ -12,7 +12,8 @@ it alone. This module keeps its pieces from drifting apart:
   dependency); broken copies of the example fail it;
 - ``src/core/PluginTypes.py`` (what running code reads: the docs are not
   shipped) has the contract's enums, patterns, limits, environment names
-  and field names;
+  and field names, and the parts already on main implement its Protocols
+  (method names and parameters);
 - the end table is ``ArchiveJobService._EndState``'s order;
 - ``routes_v1.json`` names fixed routes, THIS_PC only for the list and the
   icon, endpoints that no route of another class has taken;
@@ -535,6 +536,79 @@ def test_the_enums_are_the_contracts():
     assert _values(T.HookOutcome) == CONTRACT["hooks"]["history_outcomes"]
     assert _values(T.HookDisabledReason) \
         == CONTRACT["hooks"]["disabled_reasons"]
+    assert _values(T.InstallSourceKind) \
+        == CONTRACT["install"]["source_kinds"]
+    assert _values(T.ZipProblem) == CONTRACT["install"]["zip_problems"]
+
+
+def test_the_shared_constants_and_the_secret_free_repr():
+    # One set of official repository ids, shared by the registry (and the
+    # installer): a taguyan. id comes only from these.
+    assert isinstance(T.OFFICIAL_REPO_IDS, frozenset)
+    assert all(isinstance(n, int) for n in T.OFFICIAL_REPO_IDS)
+    from src.core import PluginRegistry
+    assert PluginRegistry.OFFICIAL_REPO_IDS is T.OFFICIAL_REPO_IDS
+    # The launch's environment holds the secrets: never in a repr.
+    env = next(f for f in dataclasses.fields(T.LaunchSpec) if f.name == "env")
+    assert env.repr is False
+    spec = T.LaunchSpec(argv=("w.exe",), cwd="c", env={"AUTONA_SECRET_X": "s3"},
+                        lane=T.Lane.LIGHT, log_path="l")
+    assert "s3" not in repr(spec)
+    # A built-in job has no time limit (job_record's timeout_seconds null).
+    assert T.Job(id="run", title="t", lane="heavy",
+                 timeout_seconds=None).timeout_seconds is None
+
+
+def _params(function):
+    import inspect
+    return list(inspect.signature(function).parameters.values())[1:]
+
+
+# (Protocol, the module and class implementing it) for the parts on main.
+IMPLEMENTED = [
+    ("PluginJobs", "PluginJobs"),
+    ("PluginRegistry", "PluginRegistry"),
+    ("PluginHooks", "PluginHooks"),
+    ("PluginSettings", "PluginSettings"),
+    ("PluginSecrets", "PluginSecrets"),
+    ("PluginInputs", "PluginInputs"),
+]
+
+
+@pytest.mark.parametrize("protocol, module", IMPLEMENTED)
+def test_the_parts_implement_their_protocols(protocol, module):
+    """Every method of the Protocol, with its parameters by name and kind
+    in order; an implementation's extra parameters have defaults."""
+    import importlib
+    import inspect
+    cls = getattr(importlib.import_module(f"src.core.{module}"), module)
+    proto = getattr(T, protocol)
+    methods = [name for name, value in vars(proto).items()
+               if callable(value) and name[:1].isupper()]
+    assert methods, protocol
+    for name in methods:
+        assert hasattr(cls, name), f"{module}.{name}"
+        wanted = _params(getattr(proto, name))
+        have = _params(getattr(cls, name))
+        assert [(p.name, p.kind) for p in have[:len(wanted)]] \
+            == [(p.name, p.kind) for p in wanted], f"{module}.{name}"
+        assert all(p.default is not inspect.Parameter.empty
+                   or p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                   for p in have[len(wanted):]), f"{module}.{name}"
+    # Pump is the dispatcher's test hook, not the contract's.
+    assert not hasattr(T.PluginHooks, "Pump")
+
+
+def test_the_protocols_name_what_the_lanes_share():
+    assert {"Claim", "Release"} <= set(vars(T.PluginJobs))
+    assert "Kill" in vars(T.RunHandle)
+    assert {"Refresh", "TrySample"} <= set(vars(T.PluginHooks))
+    assert {"DevFolderActive", "RefusedFolders"} <= set(vars(T.PluginRegistry))
+    import inspect
+    check = inspect.signature(T.PluginRegistry.Check).parameters
+    assert check["expectedId"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert {"RepoName", "RepoId", "LatestDescriptor", "Download"} \
+        <= set(vars(T.ReleaseNetwork))
 
 
 def test_the_patterns_versions_and_environment_are_the_contracts():
@@ -697,6 +771,10 @@ def test_the_dataclasses_are_spelled_like_the_contract():
     assert _names(T.DescribeRun) \
         == CONTRACT["commands"]["describe"]["runner_reports"]
     assert "id" in _names(T.DevFolder)
+    paths = CONTRACT["manifest_paths"]
+    assert set(_names(T.InstallRecord)) == set(paths["install_fields"])
+    assert _names(T.InstallSource) == ["kind", "repo_id", "name"]
+    assert list(paths["dev_list_fields"]) == ["enabled", "folders"]
 
     props = SCHEMA["properties"]
     assert set(_names(T.Manifest)) == set(props)
@@ -822,6 +900,30 @@ def test_the_routes_are_fixed_and_classed():
         == ["pickFile", "openPluginLink"]
 
 
+def test_the_routes_bodies_and_answers_name_known_shapes():
+    types = ROUTES["types"]
+    assert set(ROUTES["envelope"]) == {"ok", "error", "body_note"}
+    for route in ROUTES["routes"]:
+        for key in ("body", "answer"):
+            shape = route.get(key)
+            if shape is None:
+                continue
+            if key == "answer" and shape.startswith("raw: "):
+                # Not the envelope: a GET of a file's bytes.
+                assert route["method"] == "GET", route["endpoint"]
+                continue
+            assert shape.removesuffix("[]") in types, (route["endpoint"], shape)
+        if "body" in route:
+            assert route["method"] in ("POST", "PUT", "PATCH"), route["endpoint"]
+    # Every P2 route and the secrets' routes say what they answer (the page
+    # and the v1 handlers are built against these).
+    for route in ROUTES["routes"]:
+        if route["stage"] == "P2" or "/secrets/" in route["path"]:
+            assert "answer" in route, route["endpoint"]
+    # The plugin list answers its contract fields.
+    assert types["ListEntry"] == "contract_1.json plugin_list.fields"
+
+
 # ── the input sources' golden files ────────────────────────────────────
 
 def _log_lines():
@@ -878,6 +980,24 @@ def test_the_match_log_golden_is_what_the_match_log_writes():
         assert line["id"].startswith(stamp + "-")
     assert any(line["closed"] for line in lines)
     assert any(line["set_id"] is None for line in lines)
+
+
+def test_every_hook_has_a_golden_input_for_its_sample_run():
+    rows = {row["type"]: row for row in CONTRACT["field_types"]["source"]}
+    for row in rows.values():
+        if "golden" in row:
+            assert (PLUGINS / row["golden"]).is_file(), row["golden"]
+    from src.core import PluginHooks
+    for event, kind in T.HOOK_FILLS.items():
+        golden = rows[kind.value].get("golden")
+        assert golden, kind
+        # The dispatcher's sample run reads the same file.
+        assert PluginHooks.SAMPLE_FILES[event] == Path(golden).name
+    image = (INPUTS / "result_image.png").read_bytes()
+    assert image.startswith(b"\x89PNG\r\n\x1a\n")
+    # A stand-in: small, of an accepted image extension.
+    assert len(image) <= 4096
+    assert "png" in T.IMAGE_ARTIFACT_EXTENSIONS
 
 
 def test_the_match_record_golden_is_a_decided_line_of_the_log():
