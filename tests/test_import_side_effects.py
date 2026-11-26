@@ -369,7 +369,7 @@ assert asset_pack_service.instance is None, \
     "import created AssetPackService.instance"
 assert archive_job_service.instance is None, \
     "import created ArchiveJobService.instance"
-assert archive_worker._kernel32 is None, "import loaded kernel32"
+assert importlib.import_module("src.core.PluginRunner")._api is None,     "import loaded kernel32 (the runs' job objects, the archive's too)"
 assert archive_worker_installer.instance is None, \
     "import created ArchiveWorkerInstaller.instance"
 assert match_log_service.instance is None, \

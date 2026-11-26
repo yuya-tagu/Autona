@@ -1,6 +1,7 @@
 """The archive clipper's jobs (ADR-006 A1): core/ArchiveWorker.py (where the
-worker is, its version, how it is started), core/ArchiveJobService.py (one
-job at a time, its progress, its end state, job.json; A4: the review and the
+worker is, its version, what is started), core/ArchiveJobService.py (one
+job at a time on PluginRunner, holding PluginJobs' heavy lane -- ADR-009
+D9 --, its progress, its end state, job.json; A4: the review and the
 export of the confirmed sets, core/ArchiveReview.py) and the v1 routes the
 page calls (/api/v1/archive/*: the reads THIS_PC, the writes SHELL -- the
 shared view's fetch with the shell's secret, as the asset jobs').
@@ -12,6 +13,7 @@ tests/test_web_access.py's (the guard walks every route; the SHELL table);
 the ledger and the classification are tests/test_webserver_routes.py's.
 """
 import contextlib
+import datetime
 import json
 import os
 import shutil
@@ -26,8 +28,12 @@ from src.core import ArchiveJobService as archive
 from src.core import ArchiveReview as review
 from src.core import ArchiveTemplates as templates
 from src.core import ArchiveWorker as worker
+from src.core import PluginRunner as runner_module
 from src.core import WebAccess
 from src.core.ArchiveJobService import ArchiveError, ArchiveJobService
+from src.core.PluginJobs import PluginJobs
+from src.core.PluginRunner import PluginRunner
+from src.core.PluginTypes import JobState, Lane, StartRefusal
 from src.core.SettingsManager import SettingsManager
 from tests.fixtures import fake_vodsplit_worker as fake_worker
 from tests.test_web_access import (  # noqa: F401
@@ -46,16 +52,18 @@ RESULTS = {"event": "Fake Cup", "sets": [
 
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
-    """The fake worker as AUTONA_VODSPLIT_CMD, in mode ``ok``; cwd tmp.
+    """The fake worker as AUTONA_VODSPLIT_CMD, in mode ``ok``; cwd tmp; a
+    runner of its own as PluginRunner.instance and no PluginJobs (a test of
+    the heavy lane gives the service its own: ``lanes``).
 
-    It runs at the normal priority class, not the worker's below-normal
-    one (pinned by test_the_worker_runs_below_normal_without_a_window):
-    the parallel runner keeps every core busy at the normal priority, and
-    Windows then runs a below-normal process only when a starved thread
-    is boosted (seconds apart) -- a fake that needs a fraction of a second
-    took more than 30 s to start, and its kill outlived Shutdown's wait."""
+    It runs at the normal priority class, not a run's below-normal one
+    (pinned by tests/test_plugin_runner.py): the parallel runner keeps
+    every core busy at the normal priority, and Windows then runs a
+    below-normal process only when a starved thread is boosted (seconds
+    apart) -- a fake that needs a fraction of a second took more than 30 s
+    to start, and its kill outlived Shutdown's wait."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(worker, "_BELOW_NORMAL_PRIORITY_CLASS", 0)
+    _normal_priority(monkeypatch)
     monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
     monkeypatch.setenv("FAKE_VODSPLIT_MODE", "ok")
     for name in ("FAKE_VODSPLIT_FORMAT", "FAKE_VODSPLIT_VERSION_EXIT",
@@ -65,6 +73,29 @@ def fake(monkeypatch, tmp_path):
                  "PYINSTALLER_RESET_ENVIRONMENT"):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
+
+
+def _normal_priority(monkeypatch):
+    """Runs at the normal priority class (the fake fixture's docstring),
+    on a runner of their own as PluginRunner.instance; no PluginJobs."""
+    monkeypatch.setattr(runner_module, "BELOW_NORMAL_PRIORITY_CLASS",
+                        runner_module.NORMAL_PRIORITY_CLASS)
+    monkeypatch.setattr(PluginRunner, "instance", PluginRunner(poll=0.02))
+    monkeypatch.setattr(PluginJobs, "instance", None)
+
+
+def _lanes(tmp_path, freed=None):
+    """A PluginJobs of the lanes alone (Claim / Release / BusyFor use no
+    collaborator); `freed` gets each lane onLaneFreed names."""
+    return PluginJobs(
+        runner=None, registry=None, inputs=None, settings=None, secrets=None,
+        workDir=lambda: str(tmp_path), userDataDir=str(tmp_path),
+        hostVersion="", locale=lambda: "ja", apiUrl=lambda: None,
+        onRunEnded=lambda record: None,
+        onLaneFreed=(freed.append if freed is not None
+                     else lambda lane: None),
+        clock=lambda: datetime.datetime.now().astimezone(),
+        host={"pid": os.getpid(), "started": None})
 
 
 @pytest.fixture
@@ -238,239 +269,47 @@ def test_the_self_check_names_the_parts_that_do_not_work(fake):
 def test_the_probe_and_the_run_reset_pyinstallers_environment(fake,
                                                               monkeypatch):
     # A frozen Autona starting a frozen worker must not hand it its _PYI_*
-    # state: both the probe and the run ask PyInstaller to reset it.
+    # state: both the probe and the run ask PyInstaller to reset it. The
+    # run's environment is the runner's for a built-in (ADR-009 A.7: the
+    # development command's own name is not handed on).
     given = []
 
     def popen(argv, **kwargs):
-        given.append(("probe" if argv[-1] == "version" else "run",
-                      kwargs["env"]))
+        given.append(kwargs["env"])
         raise OSError("not started in this test")
 
     monkeypatch.setattr(worker.subprocess, "Popen", popen)
     assert worker.Probe().available is False
-    with pytest.raises(OSError):
-        worker.Launch(["worker"], ["run", SOURCE])
-    assert [(what, env["PYINSTALLER_RESET_ENVIRONMENT"],
-             env["PYTHONIOENCODING"]) for what, env in given] == [
-        ("probe", "1", "utf-8"), ("run", "1", "utf-8")]
+    given.append(worker.RunSpec(["worker"], ["run", SOURCE], "log").env)
+    assert [(env["PYINSTALLER_RESET_ENVIRONMENT"], env["PYTHONIOENCODING"])
+            for env in given] == [("1", "utf-8"), ("1", "utf-8")]
+    assert all(worker.ENV_COMMAND not in env for env in given)
     # Autona's own environment is not changed.
     assert "PYINSTALLER_RESET_ENVIRONMENT" not in os.environ
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows' flags")
-def test_the_worker_runs_below_normal_without_a_window(monkeypatch):
-    # The analysis must not take the CPU from OBS (ADR-006 D1): the run is
-    # below normal, the probe (a few lines) is not. No console window
-    # either. (The fake fixture runs the fake at the normal class.)
+def test_the_probe_has_no_window_and_the_run_is_the_heavy_lanes(monkeypatch):
+    # The probe (a few lines) runs without a console window at the normal
+    # class. The run is the runner's (ADR-009 D9): on the heavy lane, with
+    # no time limit, in Autona's folder (the development command finds its
+    # package there); its below-normal job and its window are the runner's
+    # (tests/test_plugin_runner.py).
     given = []
 
     def popen(argv, **kwargs):
-        given.append(("probe" if argv[-1] == "version" else "run",
-                      kwargs["creationflags"]))
+        given.append(kwargs["creationflags"])
         raise OSError("not started in this test")
 
     monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
     monkeypatch.setattr(worker.subprocess, "Popen", popen)
     assert worker.Probe().available is False
-    with pytest.raises(OSError):
-        worker.Launch(["worker"], ["run", SOURCE])
-    assert given == [("probe", 0x08000000), ("run", 0x08000000 | 0x00004000)]
-
-
-class _Kernel:
-    """kernel32's two job object calls, recorded (with a pause in each, so
-    two threads overlap in them)."""
-
-    def __init__(self):
-        self.calls = []
-        self.closed = set()
-
-    def TerminateJobObject(self, job, _code):
-        assert job not in self.closed, "terminated a closed handle"
-        time.sleep(0.01)
-        self.calls.append(("terminate", job))
-        return True
-
-    def CloseHandle(self, job):
-        assert job not in self.closed, "closed a handle twice"
-        time.sleep(0.01)
-        self.closed.add(job)
-        self.calls.append(("close", job))
-        return True
-
-
-class _Proc:
-    pid = 1
-
-    def __init__(self):
-        self.kills = 0
-
-    def kill(self):
-        self.kills += 1
-
-
-def test_the_job_object_is_closed_once_and_never_terminated_closed(
-        monkeypatch):
-    kernel = _Kernel()
-    monkeypatch.setattr(worker, "_kernel32", kernel)
-    proc = _Proc()
-    process = worker.WorkerProcess(proc, 77)
-    failures = []
-
-    def call(method):
-        try:
-            method()
-        except AssertionError as error:     # pragma: no cover - the bug
-            failures.append(error)
-
-    threads = [threading.Thread(target=call, args=(method,))
-               for _ in range(8)
-               for method in (process.Close, process.Kill)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    # _Kernel raises (into `failures`) on a second close or a terminate of
-    # the closed handle.
-    assert failures == []
-    assert kernel.calls.count(("close", 77)) == 1
-    assert kernel.calls[-1] == ("close", 77)
-    assert process.hasJobObject is False
-    assert proc.kills == 8
-
-    # Once closed: a kill ends the worker alone, a close does nothing.
-    calls = list(kernel.calls)
-    process.Kill()
-    process.Close()
-    assert kernel.calls == calls
-    assert proc.kills == 9
-
-
-class _PriorityKernel:
-    """kernel32's priority calls, recorded; the processes in `ended` have
-    ended (OpenProcess fails)."""
-
-    def __init__(self, ended=()):
-        self.calls = []
-        self.ended = set(ended)
-
-    def SetPriorityClass(self, handle, priority):
-        self.calls.append(("priority", handle, priority))
-        return True
-
-    def OpenProcess(self, access, inherit, pid):
-        self.calls.append(("open", access, inherit, pid))
-        return 0 if pid in self.ended else 1000 + pid
-
-    def CloseHandle(self, handle):
-        self.calls.append(("close", handle))
-        return True
-
-
-def test_raising_the_priority_takes_the_worker_and_its_jobs_processes(
-        monkeypatch):
-    # A stop is read from the worker's stdin; a below-normal worker on a
-    # busy machine reads it only when the CPU is given to it (a stop took
-    # 81 s under load). So the worker and every process in its job (yt-dlp,
-    # ffmpeg) get the normal class first.
-    kernel = _PriorityKernel(ended={43})
-    monkeypatch.setattr(worker, "_WINDOWS", True)
-    monkeypatch.setattr(worker, "_kernel32", kernel)
-    monkeypatch.setattr(worker, "_JobProcessIds",
-                        lambda job: [1, 42, 43, 44] if job == 77 else [])
-    proc = _Proc()
-    proc._handle = 500
-    worker.WorkerProcess(proc, 77).RaisePriority()
-    assert kernel.calls == [
-        ("priority", 500, 0x20),                # the worker (pid 1) itself
-        ("open", 0x0200, False, 42), ("priority", 1042, 0x20),
-        ("close", 1042),
-        ("open", 0x0200, False, 43),            # ended since: skipped
-        ("open", 0x0200, False, 44), ("priority", 1044, 0x20),
-        ("close", 1044)]
-
-    # No job object: the worker alone. Not Windows: nothing.
-    kernel.calls.clear()
-    worker.WorkerProcess(proc, None).RaisePriority()
-    assert kernel.calls == [("priority", 500, 0x20)]
-    kernel.calls.clear()
-    monkeypatch.setattr(worker, "_WINDOWS", False)
-    worker.WorkerProcess(proc, 77).RaisePriority()
-    assert kernel.calls == []
-
-    # It never raises (a stop must still be asked).
-    class Failing(_PriorityKernel):
-        def SetPriorityClass(self, handle, priority):
-            raise OSError("access denied")
-
-    monkeypatch.setattr(worker, "_WINDOWS", True)
-    monkeypatch.setattr(worker, "_kernel32", Failing())
-    worker.WorkerProcess(proc, 77).RaisePriority()
-
-
-def _priority(pid):
-    """Process `pid`'s priority class (Windows: GetPriorityClass)."""
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
-                                     wintypes.DWORD)
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetPriorityClass.argtypes = (wintypes.HANDLE,)
-    kernel32.GetPriorityClass.restype = wintypes.DWORD
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    handle = kernel32.OpenProcess(0x1000, False, pid)
-    assert handle, f"process {pid} cannot be opened"
-    try:
-        return kernel32.GetPriorityClass(handle)
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="the priority classes")
-def test_the_priority_of_a_real_worker_and_its_child_is_raised(tmp_path):
-    # A started worker is below normal, and so is what it starts (yt-dlp
-    # and ffmpeg inherit the class); RaisePriority gives both the normal
-    # class. The worker starts its child only once it was raised (a
-    # below-normal process may not run for seconds under the parallel
-    # runner), and starts it below normal explicitly.
-    script = tmp_path / "parent.py"
-    script.write_text(
-        "import subprocess, sys\n"
-        "sys.stdin.readline()\n"
-        "child = subprocess.Popen([sys.executable, '-c', "
-        "'import time; time.sleep(120)'], creationflags=0x08004000)\n"
-        "print(child.pid, flush=True)\n"
-        "sys.stdin.readline()\n", encoding="utf-8")
-    process = worker.Launch([sys.executable, str(script)], [])
-    lines = []
-    reader = threading.Thread(
-        target=lambda: lines.append(process.proc.stdout.readline()),
-        daemon=True)
-    try:
-        assert process.hasJobObject
-        assert _priority(process.pid) == 0x4000
-        process.RaisePriority()
-        assert _priority(process.pid) == 0x20
-
-        reader.start()
-        process.proc.stdin.write("go\n")
-        process.proc.stdin.flush()
-        reader.join(WAIT)
-        assert lines and lines[0].strip(), "the child's pid was not printed"
-        child = int(lines[0])
-        assert _priority(child) == 0x4000
-        process.RaisePriority()
-        assert _priority(child) == 0x20
-    finally:
-        process.Kill()
-        process.proc.wait(WAIT)
-        process.Close()
-        for stream in (process.proc.stdin, process.proc.stdout,
-                       process.proc.stderr):
-            with contextlib.suppress(OSError, ValueError):
-                stream.close()
+    assert given == [0x08000000]
+    spec = worker.RunSpec(["worker"], ["run", SOURCE], "worker.log")
+    assert (spec.argv, spec.lane, spec.timeout_seconds, spec.memory_mb,
+            spec.cwd, spec.log_path) == (
+        ("worker", "run", SOURCE), Lane.HEAVY, None, None, os.getcwd(),
+        "worker.log")
 
 
 def test_the_status_says_why_there_is_no_worker(fake, work):
@@ -781,6 +620,123 @@ def test_one_job_at_a_time(service, work, fake):
     assert _ended(service, job["id"])["state"] == "cancelled"
 
 
+def test_a_job_holds_the_heavy_lane_until_it_ends(service, work, fake,
+                                                   tmp_path):
+    # ADR-009 D6 / D9: the built-in vodsplit is one of the heavy lane's
+    # runs. While a job runs (its analysis, then its export) a plugin's
+    # heavy run is busy; its end gives the lane back, whatever the end.
+    freed = []
+    lanes = service._lanes = _lanes(tmp_path, freed)
+    _mode(fake, "slow")
+    jobId = service.Create(SOURCE)["id"]
+    busy = lanes.BusyFor(Lane.HEAVY)
+    assert busy is not None and busy.reason is StartRefusal.BUSY
+    assert lanes.Running(archive.BUILTIN_PLUGIN_ID)
+    assert not lanes.Claim(Lane.HEAVY, "someone.plugin")
+    assert lanes.BusyFor(Lane.LIGHT) is None
+    service.Cancel(jobId)
+    assert _ended(service, jobId)["state"] == "cancelled"
+    _until(lambda: freed, "the lane to be freed")
+    assert freed == [Lane.HEAVY] and lanes.BusyFor(Lane.HEAVY) is None
+
+    _mode(fake, "ok")
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    service.StartExport(DONE_ID)
+    _until(lambda: (service.Job(DONE_ID)[0]["export"] or {}).get(
+        "state") == "done", "the export to end")
+    _until(lambda: len(freed) == 2, "the lane to be freed again")
+    assert lanes.BusyFor(Lane.HEAVY) is None
+
+
+def test_a_start_is_busy_while_a_plugin_holds_the_heavy_lane(
+        service, work, fake, tmp_path):
+    lanes = service._lanes = _lanes(tmp_path)
+    _done(work, tmp_path)
+    service.SaveReview(DONE_ID, {"sets": {"1": {"confirmed": True}}})
+    stopped = "20261116-130000-cd34"
+    (work / stopped).mkdir()
+    (work / stopped / "job.json").write_text(json.dumps({
+        "id": stopped, "created_at": "2026-11-16T13:00:00+09:00",
+        "source": SOURCE, "state": "cancelled", "logs": []}),
+        encoding="utf-8")
+    before = sorted(os.listdir(work))
+    assert lanes.Claim(Lane.HEAVY, "someone.plugin")
+    for start in (lambda: service.Create(SOURCE),
+                  lambda: service.Resume(stopped),
+                  lambda: service.Reanalyze(DONE_ID, RESULTS),
+                  lambda: service.StartExport(DONE_ID)):
+        with pytest.raises(ArchiveError) as refused:
+            start()
+        assert (refused.value.code, refused.value.message) == (
+            archive.BUSY, archive.PLUGIN_BUSY)
+        # Refused before anything was written or started; the plugin keeps
+        # its lane.
+        assert sorted(os.listdir(work)) == before
+        assert service._run is None
+        assert lanes.Running("someone.plugin")
+    lanes.Release(Lane.HEAVY, "someone.plugin")
+    jobId = service.Create(SOURCE)["id"]
+    assert _ended(service, jobId)["state"] == "done"
+    assert lanes.BusyFor(Lane.HEAVY) is None
+
+
+def test_a_refused_start_gives_the_heavy_lane_back(service, work, fake,
+                                                   tmp_path):
+    lanes = service._lanes = _lanes(tmp_path)
+    work.mkdir(parents=True)
+    (work / "blocked").write_text("a file, not a folder", encoding="utf-8")
+    SettingsManager.settings["archive"] = {"work_dir": str(work / "blocked")}
+    with pytest.raises(ArchiveError) as refused:
+        service.Create(SOURCE)
+    assert refused.value.code == archive.WORK_DIR_UNUSABLE
+    assert lanes.BusyFor(Lane.HEAVY) is None
+
+
+@pytest.mark.parametrize("cause", ["popen", "job_object"])
+def test_a_worker_that_cannot_be_started_fails_its_job(
+        service, work, fake, tmp_path, monkeypatch, cause):
+    # The runner does not start the worker without its job object (the
+    # old launch went on without one): either way the job ends failed at
+    # once, the start answers UNAVAILABLE with why, and the lane is free.
+    freed = []
+    lanes = service._lanes = _lanes(tmp_path, freed)
+    jobObject = runner_module._JobObject
+    if cause == "popen":
+        def popen(*args, **kwargs):
+            raise OSError(2, "no such worker in this test")
+        service._runner = PluginRunner(poll=0.02, popen=popen)
+        why = "no such worker in this test"
+    else:
+        if sys.platform != "win32":
+            pytest.skip("the job object is Windows'")
+
+        def refused(*args, **kwargs):
+            raise OSError("CreateJobObject failed in this test")
+        monkeypatch.setattr(runner_module, "_JobObject", refused)
+        why = "CreateJobObject failed in this test"
+    with pytest.raises(ArchiveError) as unavailable:
+        service.Create(SOURCE)
+    assert unavailable.value.code == archive.UNAVAILABLE
+    assert unavailable.value.message.startswith("切り抜きワーカーを起動できません")
+    assert why in unavailable.value.message
+    jobId = service.Jobs()[0]["id"]
+    job = service.Job(jobId)[0]
+    assert job["state"] == "failed" and job["error"]["code"] == "launch"
+    assert _disk(work, jobId)["state"] == "failed"
+    assert service._run is None
+    assert lanes.BusyFor(Lane.HEAVY) is None and freed == [Lane.HEAVY]
+    # The runner's later end of that launch changes nothing.
+    time.sleep(0.2)
+    assert _disk(work, jobId)["error"]["code"] == "launch"
+    assert freed == [Lane.HEAVY]
+    # The next start probes again and runs.
+    monkeypatch.setattr(runner_module, "_JobObject", jobObject)
+    service._runner = None
+    jobId = service.Create(SOURCE)["id"]
+    assert _ended(service, jobId)["state"] == "done"
+
+
 def test_the_shutdown_cancels_a_running_job(service, work, fake):
     _mode(fake, "slow")
     job = service.Create(SOURCE)
@@ -794,59 +750,41 @@ def test_the_shutdown_cancels_a_running_job(service, work, fake):
     assert refused.value.code == archive.STOPPING
 
 
-class _RecordedStream:
-    """A worker's stdin, recording what is done to it in `events`."""
-
-    def __init__(self, stream, events):
-        self.stream, self.events = stream, events
-
-    def write(self, text):
-        self.events.append(("write", text))
-        return self.stream.write(text)
-
-    def flush(self):
-        return self.stream.flush()
-
-    def close(self):
-        self.events.append(("close",))
-        return self.stream.close()
-
-
 @pytest.mark.filterwarnings(
     "ignore::pytest.PytestUnhandledThreadExceptionWarning")
-def test_the_job_object_is_closed_before_the_job_is_let_go(service, fake):
+def test_the_job_is_let_go_once_its_process_ended(service, fake, tmp_path):
     # The worker's swap (ADR-006 A7) is granted once no job is held: by
-    # then nothing the job started may run -- even when its end failed.
-    held = []
-    close = worker.WorkerProcess.Close
+    # then nothing the job started may run, and the heavy lane is free --
+    # even when its end failed.
+    freed = []
+    service._lanes = _lanes(tmp_path, freed)
+    seen = []
+    finish = service._Finish
 
-    def recorded(process):
-        held.append(service._run is not None)
-        close(process)
+    def recorded(run, outcome):
+        seen.append((service._run is run, run.handle.proc.poll()))
+        finish(run, outcome)
 
-    def broken(_run, _exitCode):
+    def broken(_run, _outcome):
         raise RuntimeError("the end state failed in this test")
 
-    fake.setattr(worker.WorkerProcess, "Close", recorded)
+    fake.setattr(service, "_Finish", recorded)
     fake.setattr(service, "_EndState", broken)
     service.Create(SOURCE)
-    _until(lambda: len(held) >= 2 and service._run is None,
-           "the job to be let go")
-    assert held == [True, True]
+    _until(lambda: seen and service._run is None, "the job to be let go")
+    held, exitCode = seen[0]
+    assert held and exitCode is not None
+    assert freed == [Lane.HEAVY]
+    assert service._lanes.BusyFor(Lane.HEAVY) is None
 
 
 @pytest.mark.parametrize("stop", ["cancel", "shutdown"])
 @pytest.mark.parametrize("kind", ["analysis", "export"])
-def test_a_stop_raises_the_workers_priority_before_the_cancel_line(
-        service, work, fake, tmp_path, stop, kind):
-    events = []
-    raise_priority = worker.WorkerProcess.RaisePriority
-
-    def recorded(process):
-        events.append(("raise",))
-        raise_priority(process)
-
-    fake.setattr(worker.WorkerProcess, "RaisePriority", recorded)
+def test_a_stop_is_the_runners_cancel(service, work, fake, tmp_path, stop,
+                                      kind):
+    # The runner gives the job its normal priority back, writes the cancel
+    # line and closes stdin, in that order (tests/test_plugin_runner.py);
+    # the service asks it once.
     _mode(fake, "slow")
     if kind == "export":
         _done(work, tmp_path)
@@ -859,14 +797,17 @@ def test_a_stop_raises_the_workers_priority_before_the_cancel_line(
         jobId = service.Create(SOURCE)["id"]
         _running_with_progress(service, jobId)
     run = service._run
-    run.worker.proc.stdin = _RecordedStream(run.worker.proc.stdin, events)
+    asked = []
+    cancel = run.handle.Cancel
+    run.handle.Cancel = lambda: (asked.append(1), cancel())
     if stop == "cancel":
+        service.Cancel(jobId)
         service.Cancel(jobId)
         _until(run.finished.is_set, "the worker to stop")
     else:
         service.Shutdown(5.0)
-    # (The end closes the stream once more.)
-    assert events[:3] == [("raise",), ("write", "cancel\n"), ("close",)]
+    assert asked == [1]
+    assert run.handle.Wait(WAIT).state is JobState.CANCELLED
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the job object")
@@ -878,10 +819,9 @@ def test_the_shutdown_kills_a_worker_that_does_not_stop(
     job = service.Create(SOURCE)
     _running_with_progress(service, job["id"], index=2)
     run = service._run
-    assert run.worker.hasJobObject
     grandchild = int(childPid.read_text(encoding="utf-8"))
     try:
-        assert _alive(run.worker.pid) and _alive(grandchild)
+        assert _alive(run.handle.pid) and _alive(grandchild)
 
         started = time.monotonic()
         service.Shutdown(0.5)
@@ -889,8 +829,7 @@ def test_the_shutdown_kills_a_worker_that_does_not_stop(
 
         # Shutdown waits a bounded time for the end once it killed; under
         # load the kill and the reader's end can take longer than that.
-        _until(lambda: run.worker.proc.poll() is not None,
-               "the worker to end")
+        _until(lambda: not _alive(run.handle.pid), "the worker to end")
         _until(lambda: not _alive(grandchild), "the grandchild to end")
         assert run.finished.wait(WAIT)
         record = _disk(work, job["id"])
@@ -909,7 +848,7 @@ def test_a_grandchild_holding_the_stderr_does_not_hold_up_the_end(
     # A join that waited for the grandchild would take this long; the
     # bound below stays far from it so a slow start under load does not
     # look like a held-up end.
-    fake.setattr(archive, "_STDERR_JOIN_SECS", 120)
+    fake.setattr(runner_module, "STDERR_JOIN_SECONDS", 120)
     childPid = tmp_path / "child.pid"
     fake.setenv("FAKE_VODSPLIT_CHILD_PID", str(childPid))
     started = time.monotonic()

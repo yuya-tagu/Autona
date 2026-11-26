@@ -37,7 +37,7 @@ from src.core.ArchiveWorkerInstaller import (
 from src.core.SettingsManager import SettingsManager
 from src.core.TaskExecutor import TaskExecutor
 from tests.test_archive_jobs import (  # noqa: F401
-    COMMAND, SOURCE, _ended, _mode, _until)
+    COMMAND, SOURCE, _ended, _mode, _normal_priority, _until)
 from tests.test_web_access import (  # noqa: F401
     LAN_PEER, _client, _shell_headers, server, settings, shellSecret)
 
@@ -882,7 +882,7 @@ def test_a_download_that_gets_nowhere_fails_after_its_tries(env,
 def test_an_install_is_refused_while_a_job_runs_the_worker(env, monkeypatch):
     # The fake worker (AUTONA_VODSPLIT_CMD) runs a job; the installer's
     # folder is not the one used, and the page says so.
-    monkeypatch.setattr(worker, "_BELOW_NORMAL_PRIORITY_CLASS", 0)
+    _normal_priority(monkeypatch)
     monkeypatch.setenv(worker.ENV_COMMAND, COMMAND)
     _mode(monkeypatch, "slow")
     env.net.publish("0.3.0")
@@ -1022,7 +1022,7 @@ def _probing(env, monkeypatch, swaps):
         return worker.ProbeResult(True, f"0.{len(probes)}.0", 1, None,
                                   ("worker",), ())
 
-    def start(_run, probe, _arguments):
+    def start(_run, probe, _arguments, _lanes):
         started.append(probe.version)
         raise RuntimeError("not started in this test")
 

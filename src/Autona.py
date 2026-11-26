@@ -805,7 +805,10 @@ class Window(QMainWindow):
         # The archive clipper's worker (ADR-006 A1): after the web server, so
         # no request can start or resume a job any more. A running job is
         # cancelled (resumable) and its worker -- with the yt-dlp / ffmpeg it
-        # started -- ended if it has not stopped in 5 seconds.
+        # started -- ended if it has not stopped in 5 seconds. It is the
+        # runner's run (ADR-009 D9), stopped through its own handle; its end
+        # gives PluginJobs' heavy lane back. Before the runner's Shutdown
+        # below, which then finds it ended.
         try:
             from .core.ArchiveJobService import ArchiveJobService
             if ArchiveJobService.instance is not None:

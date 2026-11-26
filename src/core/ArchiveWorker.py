@@ -43,27 +43,26 @@ up to the time the caller gives (``TITLES_TIMEOUT_SECS`` by default). The
 caller is handed the process as it starts (``started``), to kill it
 (``StopTitles``) when a newer preview supersedes it.
 
-How it is started (``Launch``): stdin, stdout and stderr are pipes (stdout
-is read as UTF-8 text by line: vodsplit reconfigures its stdout to UTF-8
-and writes ``ensure_ascii=False``). On Windows it gets no console window
-and the below-normal priority class (the analysis must not take the CPU
-from OBS), and it is put in a job object with
-JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: closing the job's handle (``Close``),
-or Autona's process ending for any reason, ends the worker with every
-process it started (yt-dlp, ffmpeg). The job object is made after the
-process starts, so a process the worker starts in that instant is not in
-it (accepted: the worker's first work is reading its arguments). Elsewhere
-there is no job object; ``Kill`` ends the worker only.
+How a job's run is started (``RunSpec``, ADR-009 D9): it is the built-in
+plugin ``taguyan.vodsplit``'s run on the heavy lane, started by
+core/PluginRunner.py like any plugin's -- a job object made first
+(KILL_ON_JOB_CLOSE, the below-normal priority class as the job's limit, so
+yt-dlp and ffmpeg are below normal too: the analysis must not take the CPU
+from OBS), the process started suspended with no console window, put in
+the job and only then resumed; stdout's JSON Lines read as events, the
+cancel (the job's priority back to normal, ``cancel`` written, stdin
+closed, the job ended past the grace), the end decided by contract_1.json's
+table. A job object that cannot be made fails the launch. This module only
+says what to start (``RunSpec``); ArchiveJobService starts it.
 
-Before a stop is asked (the ``cancel`` line), ``RaisePriority`` gives the
-worker and every process in its job the normal priority class again: a
-below-normal process the CPU is not given to (a busy machine) reads its
-stdin's cancel only when it runs, which made a stop take over a minute.
-
-The probe and the run both get Autona's environment with
-``PYTHONIOENCODING=utf-8`` and ``PYINSTALLER_RESET_ENVIRONMENT=1`` (a frozen
-Autona must not hand its PyInstaller state to a frozen worker;
-``_ChildEnvironment``).
+The probe, the self-check, the titles and the run all get Autona's
+environment as PluginRunner.BuildEnvironment makes it for the built-in
+(``_ChildEnvironment``): ADR-009 A.7's names removed (``AUTONA_*``,
+``QT_API``), ``PYTHONIOENCODING=utf-8`` and
+``PYINSTALLER_RESET_ENVIRONMENT=1`` added (a frozen Autona must not hand
+its PyInstaller state to a frozen worker). The probe, the self-check and
+the titles are short runs on the calling thread with no job object, at the
+normal priority class, without a console window.
 
 Qt-free; imports on every OS (the Windows API is loaded at first use).
 Nothing is made at import.
@@ -73,12 +72,14 @@ import os
 import shlex
 import subprocess
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
+
+from . import PluginTypes as T
+from .PluginRunner import BuildEnvironment
 
 ENV_COMMAND = "AUTONA_VODSPLIT_CMD"
 # The distributed worker, under the folder Autona runs in (D5; installed and
@@ -107,15 +108,6 @@ TITLES_TIMEOUT_SECS = 8
 
 _WINDOWS = sys.platform == "win32"
 _CREATE_NO_WINDOW = 0x08000000
-_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
-_NORMAL_PRIORITY_CLASS = 0x00000020
-_PROCESS_SET_INFORMATION = 0x0200
-_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
-_JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
-# The ids a job's process list is read with (the worker, yt-dlp, ffmpeg).
-_JOB_PROCESS_IDS_MAX = 256
-_ERROR_MORE_DATA = 234
 
 
 def SplitCommand(text):
@@ -193,24 +185,19 @@ class TitlesError(Exception):
 
 
 def _ChildEnvironment():
-    env = dict(os.environ)
-    # A Python worker (the development command) writes its stdio in UTF-8
-    # even before vodsplit reconfigures it (an early traceback).
-    env["PYTHONIOENCODING"] = "utf-8"
-    # A frozen Autona starting a frozen worker: the worker is another
-    # PyInstaller program, which must not take this one's _PYI_* state
-    # (its bootloader would read it as its own: the parent's _MEIPASS).
-    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    return env
+    """The worker's environment: the built-in plugin's, as the runner makes
+    it (no protocol, no secret, no API URL). It adds PYTHONIOENCODING (a
+    Python worker -- the development command -- writes its stdio in UTF-8
+    even before vodsplit reconfigures it: an early traceback) and
+    PYINSTALLER_RESET_ENVIRONMENT (a frozen worker is another PyInstaller
+    program, which must not take this one's _PYI_* state: its bootloader
+    would read it as its own, the parent's _MEIPASS)."""
+    return BuildEnvironment(os.environ, pluginDir=WorkerDir(), protocol=None,
+                            secrets={}, apiUrl=None)
 
 
-def _CreationFlags(background):
-    if not _WINDOWS:
-        return 0
-    flags = _CREATE_NO_WINDOW
-    if background:
-        flags |= _BELOW_NORMAL_PRIORITY_CLASS
-    return flags
+def _CreationFlags():
+    return _CREATE_NO_WINDOW if _WINDOWS else 0
 
 
 def _ReadVersion(stdout):
@@ -248,7 +235,7 @@ def _Communicate(argv, timeout, stop=None):
     process = subprocess.Popen(
         argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-        env=_ChildEnvironment(), creationflags=_CreationFlags(background=False))
+        env=_ChildEnvironment(), creationflags=_CreationFlags())
     deadline = time.monotonic() + timeout
     try:
         while True:
@@ -369,7 +356,7 @@ def RunTitles(command, requestPath, templatePath, timeout=None,
              "--format", "json"], stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             encoding="utf-8", errors="replace", env=_ChildEnvironment(),
-            creationflags=_CreationFlags(background=False))
+            creationflags=_CreationFlags())
     except OSError as error:
         raise TitlesError(f"切り抜きワーカーを起動できません: {error}") from None
     try:
@@ -429,233 +416,14 @@ def StopTitles(process, wait=0):
                            f"in {wait}s")
 
 
-# The Windows job object -------------------------------------------------
+# The run ---------------------------------------------------------------
 
-_kernel32 = None
-
-
-def _Kernel32():
-    """kernel32 with the signatures this module calls (loaded once)."""
-    global _kernel32
-    if _kernel32 is None:
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID,
-                                              wintypes.LPCWSTR)
-        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-        kernel32.SetInformationJobObject.argtypes = (
-            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
-        kernel32.SetInformationJobObject.restype = wintypes.BOOL
-        kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE,
-                                                      wintypes.HANDLE)
-        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-        kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE,
-                                                wintypes.UINT)
-        kernel32.TerminateJobObject.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        kernel32.QueryInformationJobObject.argtypes = (
-            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
-            wintypes.LPDWORD)
-        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
-                                         wintypes.DWORD)
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE,
-                                              wintypes.DWORD)
-        kernel32.SetPriorityClass.restype = wintypes.BOOL
-        _kernel32 = kernel32
-    return _kernel32
-
-
-def _ExtendedLimits():
-    """A JOBOBJECT_EXTENDED_LIMIT_INFORMATION with KILL_ON_JOB_CLOSE."""
-    import ctypes
-    from ctypes import wintypes
-
-    class BasicLimits(ctypes.Structure):
-        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
-                    ("PerJobUserTimeLimit", ctypes.c_int64),
-                    ("LimitFlags", wintypes.DWORD),
-                    ("MinimumWorkingSetSize", ctypes.c_size_t),
-                    ("MaximumWorkingSetSize", ctypes.c_size_t),
-                    ("ActiveProcessLimit", wintypes.DWORD),
-                    ("Affinity", ctypes.c_size_t),
-                    ("PriorityClass", wintypes.DWORD),
-                    ("SchedulingClass", wintypes.DWORD)]
-
-    class IoCounters(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in (
-            "ReadOperationCount", "WriteOperationCount",
-            "OtherOperationCount", "ReadTransferCount",
-            "WriteTransferCount", "OtherTransferCount")]
-
-    class ExtendedLimits(ctypes.Structure):
-        _fields_ = [("BasicLimitInformation", BasicLimits),
-                    ("IoInfo", IoCounters),
-                    ("ProcessMemoryLimit", ctypes.c_size_t),
-                    ("JobMemoryLimit", ctypes.c_size_t),
-                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                    ("PeakJobMemoryUsed", ctypes.c_size_t)]
-
-    limits = ExtendedLimits()
-    limits.BasicLimitInformation.LimitFlags = (
-        _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
-    return limits
-
-
-def _MakeJobObject(proc):
-    """A job object holding `proc` that ends it (and what it starts) when
-    its handle is closed; None when it could not be made (logged: the
-    worker still runs, ``Kill`` then ends the worker alone)."""
-    import ctypes
-
-    kernel32 = _Kernel32()
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        logger.warning(f"Archive worker: no job object (CreateJobObject "
-                       f"error {ctypes.get_last_error()})")
-        return None
-    limits = _ExtendedLimits()
-    if not kernel32.SetInformationJobObject(
-            job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-            ctypes.byref(limits), ctypes.sizeof(limits)):
-        logger.warning(f"Archive worker: no job object (SetInformation "
-                       f"error {ctypes.get_last_error()})")
-        kernel32.CloseHandle(job)
-        return None
-    if not kernel32.AssignProcessToJobObject(job, int(proc._handle)):
-        logger.warning(f"Archive worker: no job object (AssignProcess "
-                       f"error {ctypes.get_last_error()})")
-        kernel32.CloseHandle(job)
-        return None
-    return job
-
-
-def _JobProcessIds(job):
-    """The ids of the processes in job object `job` (at most
-    _JOB_PROCESS_IDS_MAX); [] when they cannot be read (logged)."""
-    import ctypes
-    from ctypes import wintypes
-
-    class ProcessIdList(ctypes.Structure):
-        _fields_ = [("NumberOfAssignedProcesses", wintypes.DWORD),
-                    ("NumberOfProcessIdsInList", wintypes.DWORD),
-                    ("ProcessIdList", ctypes.c_size_t * _JOB_PROCESS_IDS_MAX)]
-
-    ids = ProcessIdList()
-    if not _Kernel32().QueryInformationJobObject(
-            job, _JOB_OBJECT_BASIC_PROCESS_ID_LIST, ctypes.byref(ids),
-            ctypes.sizeof(ids), None):
-        error = ctypes.get_last_error()
-        if error != _ERROR_MORE_DATA:  # more data: the first ones are read
-            logger.warning(f"Archive worker: the job's processes cannot be "
-                           f"read (QueryInformationJobObject error {error})")
-            return []
-    count = min(ids.NumberOfProcessIdsInList, _JOB_PROCESS_IDS_MAX)
-    return [int(pid) for pid in ids.ProcessIdList[:count]]
-
-
-class WorkerProcess:
-    """A started worker: its Popen and, on Windows, its job object.
-
-    ``Kill`` and ``Close`` may run at once on two threads (the shells' close
-    and the reader ending the job): ``_lock`` keeps the handle from being
-    closed twice or terminated once closed."""
-
-    def __init__(self, proc, job):
-        self.proc = proc
-        self._job = job
-        self._lock = threading.Lock()
-
-    @property
-    def pid(self):
-        return self.proc.pid
-
-    @property
-    def hasJobObject(self):
-        return self._job is not None
-
-    def RaisePriority(self):
-        """Give the worker and every process in its job (yt-dlp, ffmpeg)
-        the normal priority class: called before a stop is asked, which a
-        below-normal process reads only when the CPU is given to it.
-        Windows only; never raises."""
-        if not _WINDOWS:
-            return
-        import ctypes
-
-        with self._lock:
-            try:
-                kernel32 = _Kernel32()
-                if not kernel32.SetPriorityClass(int(self.proc._handle),
-                                                 _NORMAL_PRIORITY_CLASS):
-                    logger.warning(f"Archive worker: SetPriorityClass error "
-                                   f"{ctypes.get_last_error()}")
-                if self._job is None:
-                    return
-                for pid in _JobProcessIds(self._job):
-                    if pid == self.proc.pid:
-                        continue
-                    handle = kernel32.OpenProcess(_PROCESS_SET_INFORMATION,
-                                                  False, pid)
-                    if not handle:  # it has ended since
-                        continue
-                    try:
-                        kernel32.SetPriorityClass(handle,
-                                                  _NORMAL_PRIORITY_CLASS)
-                    finally:
-                        kernel32.CloseHandle(handle)
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "Archive worker: raising the priority failed")
-
-    def Kill(self):
-        """End the worker now, with every process it started when there is
-        a job object (else the worker alone). Never raises."""
-        with self._lock:
-            if self._job is not None:
-                try:
-                    _Kernel32().TerminateJobObject(self._job, 1)
-                except OSError:
-                    logger.opt(exception=True).warning(
-                        "Archive worker: TerminateJobObject failed")
-        try:
-            self.proc.kill()
-        except OSError:
-            pass
-
-    def Close(self):
-        """Close the job object's handle: what is still in it ends
-        (KILL_ON_JOB_CLOSE). Called once the worker has ended, which also
-        ends a process it left behind. Idempotent; never raises."""
-        with self._lock:
-            job, self._job = self._job, None
-            if job is not None:
-                try:
-                    _Kernel32().CloseHandle(job)
-                except OSError:
-                    logger.opt(exception=True).warning(
-                        "Archive worker: closing the job object failed")
-
-
-def Launch(command, args):
-    """Start `command` + `args` with stdin, stdout and stderr as pipes
-    (UTF-8 text, by line), in the background on Windows (no window, the
-    below-normal priority class, a job object). Raises OSError when it
-    cannot be started."""
-    proc = subprocess.Popen(
-        [*command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, encoding="utf-8",
-        errors="replace", bufsize=1, env=_ChildEnvironment(),
-        creationflags=_CreationFlags(background=True))
-    job = None
-    if _WINDOWS:
-        try:
-            job = _MakeJobObject(proc)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Archive worker: no job object")
-    return WorkerProcess(proc, job)
+def RunSpec(command, args, logPath):
+    """The PluginRunner launch of `command` + `args` (a job's analysis or
+    export, ADR-009 D9: the built-in vodsplit on the heavy lane, no time
+    limit), its stderr and non-event lines appended to `logPath`. The cwd
+    is Autona's (the development command's ``python -m vodsplit`` finds the
+    package there, as before); the environment is _ChildEnvironment's."""
+    return T.LaunchSpec(argv=(*command, *args), cwd=os.getcwd(),
+                        env=_ChildEnvironment(), lane=T.Lane.HEAVY,
+                        log_path=logPath, timeout_seconds=None)

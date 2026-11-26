@@ -533,8 +533,8 @@ def bootstrap_core():
     # picks, the secrets and settings, the registry, the input sources and
     # the runs -- after SettingsManager (./user_data, the work folder
     # archive.work_dir) and the task executor; before ArchiveJobService
-    # below (the built-in vodsplit is the runner's and the heavy lane's from
-    # ADR-009 I2), before MatchLogService (the hooks' dispatcher goes
+    # below (the built-in vodsplit is the runner's run on the heavy lane
+    # PluginJobs owns: ADR-009 D9), before MatchLogService (the hooks' dispatcher goes
     # between the runs and the match log, which hands it its candidates:
     # I5) and before the web server that serves their routes (the shells',
     # after this function returns: WebServer.__init__ adds the routes over
@@ -622,17 +622,18 @@ def bootstrap_core():
 
     # ORDER CONSTRAINT: the archive clipper's jobs (ADR-006 A1), after
     # SettingsManager (its work folder is archive.work_dir) and the plugin
-    # runner above (ADR-009 E.1: its vodsplit becomes the runner's run on
-    # the heavy lane in I2), and before the
+    # runner and runs above (ADR-009 E.1 / D9: a job's vodsplit is the
+    # runner's run, holding PluginJobs' heavy lane), and before the
     # web server that starts and reads them (the shells', after this
     # function returns); each shell's close stops its worker (Shutdown,
-    # before the executor's shutdown). Depends on nothing else and nothing
+    # before PluginJobs', the runner's and the executor's shutdown). Depends on nothing else and nothing
     # depends on it: not in the state (D6). Nothing is read, swept or
     # probed here -- the work folder at the first job request, the worker
     # at the first status.
     from .core.ArchiveJobService import ArchiveJobService
     if ArchiveJobService.instance is None:
-        ArchiveJobService.instance = ArchiveJobService()
+        ArchiveJobService.instance = ArchiveJobService(
+            runner=PluginRunner.instance, lanes=PluginJobs.instance)
 
     # The plugin runs a crash left 'running' marked failed, and each
     # plugin's kept runs pruned (ADR-009 E.2: PluginJobs.Sweep). ORDER
