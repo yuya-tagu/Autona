@@ -468,7 +468,7 @@ URL は `https://` だけ・userinfo なし・2,048 字までを確かめる。�
   "entry": ["bin/webhook.exe"],
   "update": {"github": "yuya-tagu/autona-webhook"},
   "permissions": {
-    "network": ["discord.com", "hooks.slack.com"],
+    "network": ["discord.com", "discordapp.com", "hooks.slack.com"],
     "files": "inputs",
     "spawn": false,
     "autona_api": "none",

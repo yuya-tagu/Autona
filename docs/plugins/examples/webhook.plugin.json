@@ -14,7 +14,7 @@
   "entry": ["bin/webhook.exe"],
   "update": {"github": "yuya-tagu/autona-webhook"},
   "permissions": {
-    "network": ["discord.com", "hooks.slack.com"],
+    "network": ["discord.com", "discordapp.com", "hooks.slack.com"],
     "files": "inputs",
     "spawn": false,
     "autona_api": "none",
