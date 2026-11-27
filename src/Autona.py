@@ -802,6 +802,19 @@ class Window(QMainWindow):
         except Exception:
             logger.opt(exception=True).error("Error stopping web server on shutdown")
 
+        # The plugin hooks' dispatcher (ADR-009 D.7 / E.2): stopped first at
+        # the plugins' place, after the web server, so no hook starts during
+        # the close; what is pending is dropped (never started at the close).
+        # Before the runs are cancelled below, whose ends it then ignores.
+        # Holding no lock; waits at most 2 s for a start under way.
+        try:
+            from .core.PluginHooks import PluginHooks
+            if PluginHooks.instance is not None:
+                PluginHooks.instance.Shutdown()
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error stopping the plugin hooks on shutdown")
+
         # The archive clipper's worker (ADR-006 A1): after the web server, so
         # no request can start or resume a job any more. A running job is
         # cancelled (resumable) and its worker -- with the yt-dlp / ffmpeg it

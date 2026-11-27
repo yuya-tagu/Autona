@@ -833,6 +833,49 @@ def test_a_hook_run_folder_is_removed_but_the_last_failed_one(env):
     assert env.jobs.Get(PLUGIN, second.run_id).state is JobState.ERROR
 
 
+def _StartSample(env):
+    return env.jobs.Start(
+        PLUGIN, "post_match", HOOK, {}, {},
+        {"match": InputPick(key="match", kind=FieldType.MATCH_RECORD,
+                            record={})}, sample=True)
+
+
+def test_a_sample_run_is_kept_like_a_manual_one(env):
+    # PluginHooks.TrySample: a hook trigger whose folder stays after a
+    # success (GET runs/<id> and its log), artifacts included; not listed.
+    sample = _StartSample(env)
+    assert sample.trigger == HOOK
+    (env.RunFolder(sample) / "out" / "a.txt").write_text("x",
+                                                       encoding="utf-8")
+    env.End(0, RunOutcome(state=JobState.DONE, exit_code=0,
+                          final=DoneEvent(summary="ok", artifacts=(
+                              Artifact(path="a.txt",
+                                       kind=ArtifactKind.TEXT),))))
+    assert env.ended[-1].run_id == sample.run_id
+    assert (env.RunFolder(sample) / "out" / "a.txt").exists()
+    got = env.jobs.Get(PLUGIN, sample.run_id)
+    assert got.state is JobState.DONE and len(got.artifacts) == 1
+    assert env.jobs.LogTail(PLUGIN, sample.run_id, 4096) is not None
+    assert env.jobs.List(PLUGIN) == []
+    env.clock.Advance(1)
+    # A real hook run's success still leaves nothing, and the sample stays.
+    hook = _StartHook(env)
+    env.End(1, _Done())
+    assert not env.RunFolder(hook).exists()
+    assert env.RunFolder(sample).exists()
+    env.clock.Advance(1)
+    # Left running: swept failed, its out/ kept (not a hook run's).
+    left = _StartSample(env)
+    (env.RunFolder(left) / "out" / "b.txt").write_text("y", encoding="utf-8")
+    env.clock.Advance(1)
+    env.jobs = _NewProcess(env)
+    env.jobs.Sweep()
+    swept = env.jobs.Get(PLUGIN, left.run_id)
+    assert swept.reason is EndReason.AUTONA_EXITED
+    assert (env.RunFolder(left) / "out" / "b.txt").exists()
+    assert env.RunFolder(sample).exists()
+
+
 # ── artifacts ───────────────────────────────────────────────────────────
 
 def test_artifacts_are_checked_at_done_and_when_served(env, tmp_path):
@@ -1093,7 +1136,7 @@ def test_a_broken_job_json_breaks_nothing(env):
 def test_a_failing_step_at_the_end_still_calls_back(env, monkeypatch):
     record = env.StartPost()
 
-    def broken(folder, record):
+    def broken(folder, record, sample=False):
         raise OSError(13, "denied", "C:/Users/someone")
     monkeypatch.setattr(env.jobs, "_WriteRecord", broken)
     monkeypatch.setattr(env.jobs, "_Prune",
@@ -1110,10 +1153,10 @@ def test_the_ended_run_is_read_from_memory_until_written(env, monkeypatch):
     seen = []
     write = env.jobs._WriteRecord
 
-    def spy(folder, written):
+    def spy(folder, written, sample=False):
         seen.append(env.jobs.Get(PLUGIN, record.run_id))
         seen.append([r.state for r in env.jobs.List(PLUGIN)])
-        write(folder, written)
+        write(folder, written, sample)
     monkeypatch.setattr(env.jobs, "_WriteRecord", spy)
     env.End(0, _Done(summary="done"))
     assert seen[0].state is JobState.DONE and seen[0].summary == "done"

@@ -360,7 +360,8 @@ def Assemble(app, shell=None):
     # The main thread, before anything can marshal to it.
     if AutonaQtHelper.gui_executor is None:
         AutonaQtHelper.init_gui_executor()
-    bootstrap_core()
+    # No plugin hook runs here (ADR-009 D.7): no dispatcher is made.
+    bootstrap_core(headless=True)
 
     from .core.PlayerDB import PlayerDB
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider

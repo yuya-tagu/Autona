@@ -220,8 +220,8 @@ def test_bootstrap_core_steps_and_their_order():
         # The plugins (ADR-009 E.1): after the settings and the executor,
         # before ArchiveJobService (its vodsplit is the runner's run on
         # PluginJobs' heavy lane), the match log (the hooks' dispatcher goes
-        # between: I5) and the shells' web server; in dependency order.
-        # Nothing started.
+        # between) and the shells' web server; in dependency order.
+        # Nothing started but the dispatcher's thread, after the scan.
         # The shell's picks (L10) before the settings that resolve them.
         "PluginRunner()",
         "ShellPicks()",
@@ -230,6 +230,10 @@ def test_bootstrap_core_steps_and_their_order():
         "PluginRegistry()",
         "PluginInputs()",
         "PluginJobs()",
+        # The hooks' dispatcher (ADR-009 D5; the desktop's: `headless`
+        # makes none, the probes below pin both) over the runs, before the
+        # installs that forget and refresh it.
+        "PluginHooks()",
         # The installs (P5a, I4): the installer over the runs (its hold),
         # the coordinator the routes drive over the installer.
         "PluginInstaller()",
@@ -243,6 +247,10 @@ def test_bootstrap_core_steps_and_their_order():
         # shipped), after the scan: a blocked installed plugin is off
         # before anything can start it.
         "PluginInstalls.instance.SetBlocklist(...)",
+        # The enabled hooks read and the dispatcher's thread started, after
+        # the scan and the blocklist (a blocked plugin's hooks are off),
+        # before the match log hands it candidates.
+        "PluginHooks.instance.Start()",
         # The archive clipper's jobs (ADR-006 A1): after the settings and
         # the plugin runner and runs it is given, before the shells' web
         # server; nothing read or probed here.
@@ -352,6 +360,29 @@ def test_both_shells_stop_the_plugin_runs_at_the_archive_s_place(
         "TaskExecutor.instance.shutdown")
     assert calls[jobs][1] == [grace]
     assert calls[runner][1] == ["0.0"]
+
+
+def test_the_desktop_stops_the_hooks_before_the_plugin_runs():
+    # ADR-009 D.7 / E.2: the dispatcher stopped (what is pending dropped)
+    # after the web server, before the runs are cancelled -- the archive's
+    # and PluginJobs' -- so the close starts no hook. The headless shell has
+    # none to stop (bootstrap_core(headless=True) makes none).
+    calls = [name for name, _args in _calls_in_order("src/Autona.py",
+                                                     "closeEvent")]
+    assert calls.count("PluginHooks.instance.Shutdown") == 1
+    assert calls.index("self.webserver.stop") < calls.index(
+        "PluginHooks.instance.Shutdown") < calls.index(
+        "ArchiveJobService.instance.Shutdown") < calls.index(
+        "PluginJobs.instance.Shutdown")
+    headless = [name for name, _args in _calls_in_order("src/headless.py",
+                                                        "Shutdown")]
+    assert not any("PluginHooks" in name for name in headless)
+    tree = ast.parse((PROJECT_ROOT / "src" / "headless.py").read_text(
+        encoding="utf-8"))
+    assert any(isinstance(node, ast.Call)
+               and ast.unparse(node.func) == "bootstrap_core"
+               and [ast.unparse(k) for k in node.keywords] == ["headless=True"]
+               for node in ast.walk(tree))
 
 
 # ── The wiring both shells make ─────────────────────────────────────────
@@ -587,7 +618,9 @@ from qtpy.QtCore import QCoreApplication
 app = QCoreApplication([])
 
 from src.bootstrap import bootstrap_core
-bootstrap_core()
+# As the headless shell runs it (src/headless.py): no plugin hook (ADR-009
+# D.7).
+bootstrap_core(headless=True)
 
 from src import AutonaWebOperations
 from src.AutonaHotkeys import AutonaHotkeys
@@ -679,6 +712,7 @@ flask_at_bootstrap = "flask" in sys.modules
 api_at_bootstrap = "src.AutonaPluginApi" in sys.modules
 import os
 from src import bootstrap
+from src.core.PluginHooks import PluginHooks
 from src.core.PluginInputs import PluginInputs
 from src.core.PluginInstaller import PluginInstaller
 from src.core.PluginInstalls import PluginInstalls
@@ -717,8 +751,15 @@ plugins = {
              deps.inputs is PluginInputs.instance,
              deps.jobs is PluginJobs.instance,
              deps.installs is PluginInstalls.instance],
-    # Not this stage's: the reveal is the desktop's, the hooks I5's.
+    # Not this shell's: the reveal and the hooks are the desktop's (D.7:
+    # no dispatcher, the match log and the installs told nothing).
     "later": [deps.revealFile, deps.hooks],
+    "no_hooks": [PluginHooks.instance is None,
+                 MatchLogService.instance._hooks is None,
+                 PluginInstaller.instance._hooks is None,
+                 PluginInstalls.instance._hooks is None,
+                 not any(t.name == "AutonaPluginHooks"
+                         for t in threading.enumerate())],
     # The installs hold the runs' starts; nothing blocked (no listing copy
     # in this throwaway directory, none shipped in a source checkout).
     "installs": [PluginInstaller.instance._jobs is PluginJobs.instance,
@@ -837,6 +878,7 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert plugins["listed"] == ["taguyan.vodsplit"]
     assert all(plugins["deps"]), plugins
     assert plugins["later"] == [None, None]
+    assert plugins["no_hooks"] == [True] * 5
     assert plugins["installs"] == [True, True, True]
     assert plugins["pick"] == [True, None, None]
     assert plugins["same_pick"] is True
@@ -902,6 +944,51 @@ from src.core.GameLoader import GameLoader
 provider = AutonaTournamentDataProvider.instance
 loader = GameLoader.instance
 
+
+def hooks_wiring():
+    from src import bootstrap
+    from src.core.MatchLogService import MatchLogService
+    from src.core.PluginHooks import PluginHooks
+    from src.core.PluginInstaller import PluginInstaller
+    from src.core.PluginInputs import PluginInputs
+    from src.core.PluginInstalls import PluginInstalls
+    from src.core.PluginJobs import PluginJobs
+    from src.core.PluginTypes import (
+        JobState, Lane, Trigger, TriggerKind, RunRecord, HookEvent)
+    from src.core.ResultService import ResultService
+    hooks = PluginHooks.instance
+    told = []
+    hooks.RunEnded = lambda *args: told.append(("ended", args[0], args[1]))
+    hooks.LaneFreed = lambda: told.append(("freed",))
+    hooks.ResultImageSaved = lambda path: told.append(("image", path))
+    record = lambda kind: RunRecord(
+        run_id="r", plugin="a.b", job="j",
+        trigger=Trigger(kind, event=HookEvent.MATCH_DECIDED,
+                        hook="j/match_decided")
+        if kind is TriggerKind.HOOK else Trigger(kind),
+        lane=Lane.LIGHT, state=JobState.DONE, started_at="")
+    PluginJobs.instance._onRunEnded(record(TriggerKind.HOOK))
+    PluginJobs.instance._onRunEnded(record(TriggerKind.MANUAL))
+    PluginJobs.instance._onLaneFreed(Lane.LIGHT)
+    PluginJobs.instance._onLaneFreed(Lane.HEAVY)
+    ResultService.instance._saved("/x.png")
+    del hooks.RunEnded, hooks.LaneFreed, hooks.ResultImageSaved
+    return {
+        "made": hooks is not None,
+        "started": any(t.name == "AutonaPluginHooks"
+                       for t in threading.enumerate()),
+        "given": [MatchLogService.instance._hooks is hooks,
+                  PluginInstaller.instance._hooks is hooks,
+                  PluginInstalls.instance._hooks is hooks,
+                  bootstrap.plugin_api_deps().hooks is hooks],
+        # The golden inputs a sample run hands (D.6), the same folder the
+        # input sources take a sample image from.
+        "samples": [hooks._samplesDir == PluginInputs.instance.samplesDir,
+                    hooks._samplesDir.replace("\\", "/")
+                    .endswith("/docs/plugins/inputs")],
+        "told": told,
+    }
+
 # The boards as the bootstrap left them, before anything below writes.
 with StateManager.lock:
     launch_boards = {
@@ -953,6 +1040,10 @@ report({
         AutonaShellOperations.instance._registry
         is __import__("src.core.PluginRegistry", fromlist=["x"])
         .PluginRegistry.instance],
+    # The hooks' dispatcher is the desktop's (ADR-009 D5 / E.1): made by
+    # bootstrap_core() and started, given to the match log, the installs,
+    # the routes; the runs' ends and the result images reach it.
+    "hooks": hooks_wiring(),
     "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -989,6 +1080,14 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["boards_ensured"] == [True, True, True]
     assert result["plugin_reveal"] == "_reveal_plugin_file"
     assert result["plugin_shell"] == [True, True]
+    hooks = result["hooks"]
+    assert hooks["made"] and hooks["started"], hooks
+    assert hooks["given"] == [True] * 4
+    assert hooks["samples"] == [True, True]
+    # A hook's run's end (not a manual one's), the light lane (not the
+    # heavy one), each result image saved.
+    assert hooks["told"] == [["ended", "a.b", "j/match_decided"], ["freed"],
+                             ["image", "/x.png"]]
     assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False

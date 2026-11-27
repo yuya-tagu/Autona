@@ -1305,17 +1305,23 @@ class PluginJobs(Protocol):
     failed one of each hook (request.json and worker.log kept for 'see the
     log'; replaced by the next failure). Its runs do not count towards
     RUNS_KEPT_PER_PLUGIN; the hook's history (PluginHooks) keeps the
-    summary."""
+    summary. A sample run (``sample=True``, PluginHooks.TrySample) is a
+    hook trigger kept like a manual run: its folder and artifacts stay, it
+    counts towards RUNS_KEPT_PER_PLUGIN and Get / LogTail answer it after
+    it ends, but List leaves it out."""
 
     def Start(self, pluginId: str, jobId: str, trigger: Trigger,
               params: Mapping[str, Any], settings: Mapping[str, Any],
-              picks: Mapping[str, InputPick]) -> Union[RunRecord, Refused]:
+              picks: Mapping[str, InputPick], *,
+              sample: bool = False) -> Union[RunRecord, Refused]:
         """Start a run (manual, action or hook) or say why not. ``params``
         are the job's value fields (file / folder already resolved paths),
-        ``settings`` PluginSettings.Get's. Calls neither callback (above);
-        a run cancelled while being prepared comes back as its record,
-        CANCELLED. UNAVAILABLE after Shutdown, or when the host cannot write
-        the run's folder (detail)."""
+        ``settings`` PluginSettings.Get's. ``sample``: a hook trigger's
+        sample run, kept like a manual run (above; nothing for another
+        trigger). Calls neither callback (above); a run cancelled while
+        being prepared comes back as its record, CANCELLED. UNAVAILABLE
+        after Shutdown, or when the host cannot write the run's folder
+        (detail)."""
 
     def BusyFor(self, lane: Lane) -> Optional[Refused]:
         """BUSY (with the remaining time when known) if ``lane`` is full,
@@ -1430,7 +1436,8 @@ class PluginHooks(Protocol):
     def SetEnabled(self, pluginId: str, hookKey: str, enabled: bool,
                    params: Mapping[str, Any]) -> Union[HookStatus, Refused]:
         """Enable (with the values it runs with; a file / folder value as a
-        pick id) or disable a hook."""
+        pick id, and a file / folder key left out keeps the path saved
+        before) or disable a hook (``params`` ignored)."""
 
     def Status(self, pluginId: str) -> Sequence[HookStatus]:
         """The plugin's hooks."""

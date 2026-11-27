@@ -190,7 +190,7 @@
     "rejected": ["outside_out_dir", "symlink_or_junction", "hard_link", "missing", "not_a_file", "too_large", "bad_extension", "unknown_kind"],
     "checked": ["at_done", "at_serve"],
     "rejected_note": "A rejected artifact is dropped and a host warning is added to the job. An image over max_bytes or with another extension is rejected; a text over max_bytes is rejected. Served with a fixed Content-Type and X-Content-Type-Options: nosniff, on SHELL routes only.",
-    "hook_runs": "a hook's job folder is removed when it ends (but the last failed one): no artifact is kept, the history keeps the summary"
+    "hook_runs": "a hook's job folder is removed when it ends (but the last failed one): no artifact is kept, the history keeps the summary. A dev plugin's sample run (PluginHooks.TrySample) is kept like a manual run (its folder and artifacts; counted in runs_kept_per_plugin; not in the runs list, read by its run_id)"
   },
 
   "exit_codes": {

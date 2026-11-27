@@ -17,7 +17,11 @@ a = Analysis(
         ('../src/i18n/*.json', 'src/i18n'),
         ('../src/i18n/*.qm', 'src/i18n'),
 #       ('../web/build/*', 'web/build'),
-        ('../src/TournamentDataProvider/*.txt', 'src/TournamentDataProvider')
+        ('../src/TournamentDataProvider/*.txt', 'src/TournamentDataProvider'),
+        # The plugins' golden inputs (a few KB): a dev plugin's 'try with the
+        # sample input' of a hook (ADR-009 D.6) reads them through
+        # AutonaResolve (src/bootstrap.py PLUGIN_SAMPLES_DIR).
+        ('../docs/plugins/inputs/*', 'docs/plugins/inputs')
     ],
     hookspath=[],
     runtime_hooks=[],

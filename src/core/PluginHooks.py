@@ -82,7 +82,8 @@ The dev plugins' 'try with the sample input' (D.6) is ``TrySample``: one
 start with the golden input of ``samplesDir`` (docs/plugins/inputs/), not
 counted in the windows nor the failures. A result_image_saved sample
 uses the stand-in ``result_image.png`` (contract_1.json field_types
-source[].golden).
+source[].golden). It starts with ``sample=True``: PluginJobs keeps its
+folder like a manual run's (GET runs/<id> and its log after it ends).
 
 Threads and locks
 -----------------
@@ -215,6 +216,10 @@ class _Plugin:
 
 
 class PluginHooks:
+
+    # The one bootstrap_core() makes on the desktop (ADR-009 E.1); None
+    # until then, and headless (D.7).
+    instance = None
 
     def __init__(self, userDataDir, registry, start, *, busy=None,
                  settings=None, resolvePick=None, clock=None,
@@ -372,8 +377,11 @@ class PluginHooks:
 
     def SetEnabled(self, pluginId, hookKey, enabled, params):
         """Enable a hook with the values it runs with (every value field of
-        the job: a missing or empty one is its default; checked by
-        PluginSettings.CheckFieldValue, a file / folder as a pick id), or
+        the job: a missing or empty one is its default -- but a file /
+        folder key left out keeps the path saved before, when there is one:
+        the page shows it by name and sends a pick id only when the user
+        picks again; checked by PluginSettings.CheckFieldValue, a file /
+        folder as a pick id), or
         disable it (``params`` ignored; its saved values stay for the next
         enable). UNAVAILABLE headless, after Shutdown, or while its
         hooks.json cannot be read."""
@@ -393,8 +401,11 @@ class PluginHooks:
             if enabled:
                 if not self._Usable(pluginId, job.id, hook.on):
                     return Refused(StartRefusal.JOB_UNUSABLE)
-                values = _CheckParams(job, params or {},
-                                      resolvePick=self._resolvePick)
+                saved = state.hooks.get(hookKey)
+                values = _CheckParams(
+                    job, params or {}, resolvePick=self._resolvePick,
+                    keptPaths=_KeptPaths(job, params or {},
+                                         saved.params if saved else {}))
                 if isinstance(values, Refused):
                     return values
                 entry = state.hooks.setdefault(hookKey, _Hook())
@@ -492,7 +503,9 @@ class PluginHooks:
             result = self._start(
                 pluginId, job.id,
                 Trigger(TriggerKind.HOOK, event=event, hook=hookKey),
-                params, settings, {pick.key: pick})
+                params, settings, {pick.key: pick}, sample=True)
+            # Its folder stays like a manual run's (PluginJobs); its end
+            # is not counted (_Ended).
             if isinstance(result, RunRecord):
                 self._samples.add(result.run_id)
             return result
@@ -1026,12 +1039,23 @@ def _Empty(field, value):
         field.type in (FieldType.TEXT, FieldType.TEXTAREA) and value == "")
 
 
-def _CheckParams(job, values, *, resolvePick=None, stored=False):
+def _KeptPaths(job, values, saved):
+    """The saved file / folder paths of `job`'s fields that `values` leaves
+    out (SetEnabled keeps them: the page sends a pick id only for a field
+    picked again)."""
+    return {f.key: saved[f.key] for f in job.params
+            if f.type in (FieldType.FILE, FieldType.FOLDER)
+            and f.key not in values and not _Empty(f, saved.get(f.key))}
+
+
+def _CheckParams(job, values, *, resolvePick=None, stored=False,
+                 keptPaths=None):
     """Every value field of `job` -> its checked value (a missing or empty
     one its default, else None), or INVALID_REQUEST naming the key. A file
     / folder value is a pick id resolved by `resolvePick`, or -- `stored`,
-    a saved value -- the path kept before. Source fields are the
-    trigger's, not values."""
+    a saved value -- the path kept before. `keptPaths`: key -> a saved path
+    used, checked as a kept value, for a key `values` leaves out. Source
+    fields are the trigger's, not values."""
     if not isinstance(values, dict) and not hasattr(values, "items"):
         return Refused(StartRefusal.INVALID_REQUEST,
                        detail="params: not an object")
@@ -1042,7 +1066,15 @@ def _CheckParams(job, values, *, resolvePick=None, stored=False):
         return Refused(StartRefusal.INVALID_REQUEST,
                        detail=f"{unknown[0][:40]}: no such value")
     checked = {}
+    keptPaths = keptPaths or {}
     for f in fields:
+        if f.key in keptPaths and f.key not in values:
+            ok, value = CheckFieldValue(f, keptPaths[f.key], stored=True)
+            if not ok:
+                return Refused(StartRefusal.INVALID_REQUEST,
+                               detail=f"{f.key}: {value}")
+            checked[f.key] = value
+            continue
         value = values.get(f.key)
         defaulted = _Empty(f, value)
         if defaulted:

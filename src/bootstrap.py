@@ -61,10 +61,19 @@ USER_DATA_DIR = "./user_data"
 # .revealFile): the desktop's, set by bootstrap_gui(); None in the headless
 # shell (its SHELL routes answer 403 anyway). Read by plugin_api_deps().
 _plugin_reveal_file = None
+# The plugins' golden inputs (ADR-009 D.6: a dev plugin's sample run of a
+# hook), through AutonaResolve: the checkout's docs/, a release's
+# _internal/ (packaging/autona.spec bundles them).
+PLUGIN_SAMPLES_DIR = "./docs/plugins/inputs"
 
 
-def bootstrap_core():
+def bootstrap_core(headless=False):
     """Load the core data and create the singletons every shell depends on.
+
+    `headless`: the headless shell's (src/headless.py), which runs no plugin
+    hook (ADR-009 D.7: the hooks' dispatcher is not made, the match log is
+    given none). The desktop calls it without (src/Autona.py, and
+    bootstrap_gui() as its guard).
 
     Safe to call more than once; only the first call does work.
     """
@@ -431,7 +440,11 @@ def bootstrap_core():
             refreshTournament=(
                 AutonaTournamentDataProvider.instance.RefreshTournamentData),
             currentProvider=lambda:
-                AutonaTournamentDataProvider.instance.provider)
+                AutonaTournamentDataProvider.instance.provider,
+            # Each result image saved: the hooks' result_image_saved
+            # (ADR-009 D.2), read when told -- the dispatcher is made
+            # below, and not at all headless.
+            saved=_result_image_saved)
 
     # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
     # countries, regions and the city -> region lookup, ADR-005 S1c) has to
@@ -531,16 +544,18 @@ def bootstrap_core():
 
     # ORDER CONSTRAINT: the plugins (ADR-009 E.1) -- the runner, the shell's
     # picks, the secrets and settings, the registry, the input sources, the
-    # runs, the installer and the installs -- after SettingsManager (./user_data, the work folder
+    # runs, the hooks' dispatcher (the desktop's), the installer and the
+    # installs -- after SettingsManager (./user_data, the work folder
     # archive.work_dir) and the task executor; before ArchiveJobService
     # below (the built-in vodsplit is the runner's run on the heavy lane
-    # PluginJobs owns: ADR-009 D9), before MatchLogService (the hooks' dispatcher goes
-    # between the runs and the match log, which hands it its candidates:
-    # I5) and before the web server that serves their routes (the shells',
-    # after this function returns: WebServer.__init__ adds the routes over
-    # plugin_api_deps()). None imports Qt or flask; making them starts no
-    # process or thread (the sweep's job below does run on an executor
-    # lane). What they read when used -- the match log's flush and open
+    # PluginJobs owns: ADR-009 D9), before MatchLogService (the hooks'
+    # dispatcher goes between the runs and the match log, which hands it its
+    # candidates) and before the web server that serves their routes (the
+    # shells', after this function returns: WebServer.__init__ adds the
+    # routes over plugin_api_deps()). None imports Qt or flask; making them
+    # starts no process or thread (the sweep's job below does run on an
+    # executor lane; the dispatcher's thread is started after the scan,
+    # below). What they read when used -- the match log's flush and open
     # record, the archive's work folder and last probe, the runs for the
     # list's state, the server's address, the locale -- is read through
     # callables, so the match log and ArchiveJobService (made below) and the
@@ -549,7 +564,12 @@ def bootstrap_core():
     # (a file / folder value is a pick id: ShellPicks.Resolve, L10), the
     # registry over settings (its needs_settings) and the runner (a dev
     # plugin's describe), the runs over all of them, the installer over the
-    # runs (its hold) and the installs over the installer; the registry
+    # runs (its hold) and the installs over the installer; the hooks over
+    # the runs (their start, the light lane) and before the installer and
+    # the installs (both forget and refresh them: a new install, a
+    # reconsent, a block, a removal); the runs tell the hooks of a hook's
+    # run's end and the light lane freed through functions that read the
+    # dispatcher when called (made after them); the registry
     # reads the installer and the installs back through lambdas (enabled,
     # install.json's source, the blocklist). The user_data folder is
     # made absolute here, once: every part names the same folder whatever
@@ -557,6 +577,7 @@ def bootstrap_core():
     import os
 
     from .core import MatchLogService as matchLog
+    from .core.PluginHooks import PluginHooks
     from .core.PluginInputs import PluginInputs
     from .core.PluginInstaller import PluginInstaller
     from .core.PluginInstalls import PluginInstalls
@@ -565,9 +586,14 @@ def bootstrap_core():
     from .core.PluginRunner import PluginRunner
     from .core.PluginSecrets import PluginSecrets
     from .core.PluginSettings import PluginSettings
+    from .core.PluginTypes import Lane
     from .core.ShellPicks import ShellPicks
+    from .Helpers.AutonaDirHelper import AutonaResolve
     hostVersion = _program_version() or ""
     userData = os.path.abspath(USER_DATA_DIR)
+    # The golden inputs (docs/plugins/inputs/; a release has them under
+    # _internal/): a dev plugin's sample run of a hook (ADR-009 D.6).
+    samplesDir = AutonaResolve(PLUGIN_SAMPLES_DIR)
     if PluginRunner.instance is None:
         PluginRunner.instance = PluginRunner()
     if ShellPicks.instance is None:
@@ -602,7 +628,10 @@ def bootstrap_core():
             flushMatchLog=lambda: matchLog.MatchLogService.instance.Flush(
                 timeout=2.0),
             openRecordDate=lambda: matchLog.MatchLogService.instance
-                .OpenRecordDate())
+                .OpenRecordDate(),
+            # A dev plugin's sample run of a result_image_saved hook hands
+            # the stand-in image of the golden inputs (ADR-009 D.6).
+            samplesDir=samplesDir)
     if PluginJobs.instance is None:
         PluginJobs.instance = PluginJobs(
             runner=PluginRunner.instance, registry=PluginRegistry.instance,
@@ -611,21 +640,37 @@ def bootstrap_core():
             userDataDir=userData, hostVersion=hostVersion,
             locale=lambda: AutonaLocaleHelper.programLocale,
             apiUrl=_plugin_api_url,
-            # The hooks' dispatcher's (I5: PluginHooks.RunEnded for a
-            # hook's run, LaneFreed for the light lane). None yet.
-            onRunEnded=lambda record: None,
-            onLaneFreed=lambda lane: None)
+            # The hooks' dispatcher's (ADR-009 D.3-D.5): a hook's run's end
+            # counted, the light lane freed tried for the pending hooks.
+            onRunEnded=_plugin_run_ended,
+            onLaneFreed=_plugin_lane_freed)
+    # The hooks' dispatcher (ADR-009 D5, appendix D), the desktop's alone:
+    # the headless shell runs no hook (D.7: nothing to enable them, see
+    # their failures or stop them with), so it has none, and the match log
+    # and the routes get None. Over the registry (the hook jobs), the runs
+    # (its start; the light lane full), the settings (a run's request.json)
+    # and the picks (a file / folder value). Making it reads nothing; its
+    # thread is started after the scan, below.
+    if not headless and PluginHooks.instance is None:
+        PluginHooks.instance = PluginHooks(
+            userData, PluginRegistry.instance, PluginJobs.instance.Start,
+            busy=lambda: PluginJobs.instance.BusyFor(Lane.LIGHT) is not None,
+            settings=_plugin_hook_settings,
+            resolvePick=ShellPicks.instance.Resolve,
+            samplesDir=samplesDir)
     # The installs (P5a, wiring I4): the installer over the registry's
     # check and describe, the runs' hold (the swap and a removal), the
-    # secrets' Forget; the coordinator the routes drive (its prepare,
-    # commit and removal are executor jobs). The hooks join them in I5
-    # (both take ``hooks``: PluginHooks.Forget / Refresh). Making them reads
+    # secrets' and the hooks' Forget (a new install, a reconsent, a
+    # removal: the installer; a block: the installs) and the hooks'
+    # Refresh after a scan (the installs); the coordinator the routes drive
+    # (its prepare, commit and removal are executor jobs). Making them reads
     # nothing; the leftovers' sweep is the launch job below.
     if PluginInstaller.instance is None:
         PluginInstaller.instance = PluginInstaller(
             str(AutonaDirHelper.current_dir), userData,
             registry=PluginRegistry.instance, runner=PluginRunner.instance,
             hostVersion=hostVersion, secrets=PluginSecrets.instance,
+            hooks=PluginHooks.instance,
             jobs=PluginJobs.instance, workDir=_archive_work_dir,
             isDevId=lambda pluginId: any(
                 folder.plugin_id == pluginId
@@ -635,7 +680,7 @@ def bootstrap_core():
     if PluginInstalls.instance is None:
         PluginInstalls.instance = PluginInstalls(
             PluginInstaller.instance, PluginRegistry.instance,
-            jobs=PluginJobs.instance)
+            jobs=PluginJobs.instance, hooks=PluginHooks.instance)
 
     # The plugins at launch (ADR-009 E.2): every manifest read, nothing
     # started. The scan is a few stats and the built-in's folder walked once
@@ -656,17 +701,29 @@ def bootstrap_core():
     # The blocklist in effect (ADR-009 C.4): the listing's previous copy,
     # else the one shipped with Autona (fetching it is P5b's). A few KB
     # read here, after the scan: an installed plugin it blocks is turned
-    # off (its hooks too, once I5 gives the installs the hooks) before
-    # anything can start it.
+    # off (its hooks too: PluginHooks.Forget, BLOCKED) before anything can
+    # start it.
     from .core.PluginInstalls import (BUNDLED_LISTING, LISTING_COPY,
                                       ReadListingBlocklist)
-    from .Helpers.AutonaDirHelper import AutonaResolve
     try:
         PluginInstalls.instance.SetBlocklist(ReadListingBlocklist((
             os.path.join(userData, "plugins", LISTING_COPY),
             AutonaResolve(BUNDLED_LISTING))))
     except Exception:
         logger.opt(exception=True).error("Plugins: the blocklist failed")
+    # The hooks' dispatcher started (the desktop's): the enabled hooks read
+    # (each plugin with a hook job's hooks.json -- after the scan, which
+    # says which, and the blocklist, which turned a blocked one's off) and
+    # its thread started. ORDER CONSTRAINT: before MatchLogService below
+    # (its first candidate) and the shells' web server; nothing triggers a
+    # hook before then. A failure is logged and the launch goes on: no hook
+    # runs until the next refresh reads them.
+    if PluginHooks.instance is not None:
+        try:
+            PluginHooks.instance.Start()
+        except Exception:
+            logger.opt(exception=True).error(
+                "Plugins: the hooks could not be started")
 
     # ORDER CONSTRAINT: the archive clipper's jobs (ADR-006 A1), after
     # SettingsManager (its work folder is archive.work_dir) and the plugin
@@ -728,10 +785,14 @@ def bootstrap_core():
     # tournament restore and web server, headless too. It reads and queues
     # inside the observer and writes on a thread of its own; each shell's
     # close stops it (Shutdown, after the web server and the executor, which
-    # can still publish). Nothing reads or writes through it.
+    # can still publish). Nothing reads or writes through it. ORDER
+    # CONSTRAINT: after the hooks' dispatcher (the desktop's, above), which
+    # its observer queues match_decided's candidates to (ADR-009 E.1).
     from .core.MatchLogService import MatchLogService
     if MatchLogService.instance is None:
-        MatchLogService.instance = MatchLogService()
+        # The hooks' dispatcher it tells of match_decided's candidates
+        # (ADR-009 D.1; None headless: nothing told).
+        MatchLogService.instance = MatchLogService(hooks=PluginHooks.instance)
         MatchLogService.instance.Start()
 
     # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
@@ -939,13 +1000,14 @@ def _program_version():
 def plugin_api_deps():
     """The plugin v1 routes' parts (AutonaPluginApi.PluginApiDeps), from
     what bootstrap_core() made (a part not made yet is None: its routes
-    answer 503) and the desktop's reveal (bootstrap_gui()). WebServer
-    .__init__ hands them to RegisterPluginRoutes before it registers the v1
-    blueprint, so flask and the routes are imported with the web server,
-    after the window is shown (ADR-003), not at bootstrap. A new object per
-    call, read per request: what a later stage adds (the hooks, I5) is
-    added here."""
+    answer 503: the hooks headless) and the desktop's reveal
+    (bootstrap_gui()). WebServer.__init__ hands them to
+    RegisterPluginRoutes before it registers the v1 blueprint, so flask
+    and the routes are imported with the web server, after the window is
+    shown (ADR-003), not at bootstrap. A new object per call, read per
+    request: what a later stage adds is added here."""
     from .AutonaPluginApi import PluginApiDeps
+    from .core.PluginHooks import PluginHooks
     from .core.PluginInputs import PluginInputs
     from .core.PluginInstalls import PluginInstalls
     from .core.PluginJobs import PluginJobs
@@ -958,8 +1020,61 @@ def plugin_api_deps():
         registry=PluginRegistry.instance, settings=PluginSettings.instance,
         secrets=PluginSecrets.instance, inputs=PluginInputs.instance,
         jobs=PluginJobs.instance, installs=PluginInstalls.instance,
+        hooks=PluginHooks.instance,
         resolvePick=picks.Resolve if picks is not None else None,
         workDir=_archive_work_dir, revealFile=_plugin_reveal_file)
+
+
+def _plugin_hooks():
+    """The hooks' dispatcher (the desktop's; None headless or before
+    bootstrap_core() made it)."""
+    from .core.PluginHooks import PluginHooks
+    return PluginHooks.instance
+
+
+def _plugin_run_ended(record):
+    """PluginJobs' onRunEnded: a hook's run's end, counted by the
+    dispatcher (ADR-009 D.5: failures, history, the last error). Another
+    run's end tells it nothing. Outside PluginJobs' lock; only queues."""
+    from .core.PluginTypes import TriggerKind
+    hooks = _plugin_hooks()
+    if hooks is not None and record.trigger.kind is TriggerKind.HOOK:
+        hooks.RunEnded(record.plugin, record.trigger.hook, record)
+
+
+def _plugin_lane_freed(lane):
+    """PluginJobs' onLaneFreed: the light lane free, the pending hooks tried
+    (ADR-009 D.3). The heavy lane runs no hook. Only queues."""
+    from .core.PluginTypes import Lane
+    hooks = _plugin_hooks()
+    if hooks is not None and lane == Lane.LIGHT:
+        hooks.LaneFreed()
+
+
+def _plugin_hook_settings(pluginId):
+    """The hooks' settings(pluginId): the plugin's settings for a hook run's
+    request.json, as a manual run's route reads them (PluginSettings.Get
+    over the registry's manifest; a dev plugin's own). {} when it has no
+    usable manifest (the start then refuses it)."""
+    from .core.PluginRegistry import PluginRegistry
+    from .core.PluginSettings import PluginSettings
+    from .core.PluginTypes import Badge
+    registered = PluginRegistry.instance.Get(pluginId)
+    manifest = (registered.report.manifest
+                if registered is not None else None)
+    if manifest is None:
+        return {}
+    return PluginSettings.instance.Get(
+        pluginId, manifest, dev=registered.badge == Badge.DEV)
+
+
+def _result_image_saved(path):
+    """ResultService's saved(path): one result image saved to out/results,
+    the hooks' result_image_saved (ADR-009 D.2). The dispatcher queues it
+    only when a hook on it is enabled (D.7); headless there is none."""
+    hooks = _plugin_hooks()
+    if hooks is not None:
+        hooks.ResultImageSaved(path)
 
 
 def _plugin_install_source(pluginId):

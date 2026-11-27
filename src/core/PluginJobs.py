@@ -32,7 +32,11 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
   A hook's run folder is removed when it ends, except the last failed one
   of each hook (without inputs/ and out/: a hook run keeps no artifact,
   replaced by the next failure). Hook runs are not listed (List) and do
-  not count; Get still answers the kept one (its log). A folder is removed
+  not count; Get still answers the kept one (its log). A dev plugin's
+  sample run (Start ``sample=True``: PluginHooks.TrySample) is a hook
+  trigger kept like a manual run: its folder and artifacts stay, it counts
+  towards RUNS_KEPT_PER_PLUGIN and Get answers it, but it is not listed
+  (SAMPLE_KEY in job.json says which). A folder is removed
   job.json last, so one cut short is still found and removed again;
 - the launch's Sweep (job.json still running -> FAILED / AUTONA_EXITED)
   and the shells' Shutdown (cancel this module's runs, wait the grace).
@@ -129,6 +133,9 @@ _DATA_DIR = "data"
 # for it). Not contract_1.json's job_record: RecordFrom never reads it and
 # the routes never serve it; only the Sweep asks it.
 HOST_KEY = "_host"
+# job.json's private key of a sample run (true; absent otherwise): a hook
+# trigger kept like a manual run (_Prune, the Sweep). Private like HOST_KEY.
+SAMPLE_KEY = "_sample"
 # OpenProcess's access for the creation time and the exit code, the error
 # it gives for a process that is there but not ours to ask, and the exit
 # code of one still running.
@@ -738,10 +745,14 @@ class _Run:
         self.error: Optional[ErrorEvent] = None
         self.finishedBeforeCancel = False
         self.peak: Optional[int] = None
+        # A sample run (Start sample=True): kept like a manual run.
+        self.sample = False
 
     @property
     def hook(self):
-        return TriggerKind(self.plan.trigger.kind) is TriggerKind.HOOK
+        """Whether its folder goes as a hook run's (a sample run's stays)."""
+        return (TriggerKind(self.plan.trigger.kind) is TriggerKind.HOOK
+                and not self.sample)
 
     def Record(self) -> RunRecord:
         return RunRecord(
@@ -906,15 +917,17 @@ class PluginJobs:
                            f"{_Failure(error)}")
             return None
 
-    def _WriteRecord(self, folder, record):
+    def _WriteRecord(self, folder, record, sample=False):
         content = RecordJson(record)
         content[HOST_KEY] = self._host
+        if sample:
+            content[SAMPLE_KEY] = True
         with self._filesLock:
             _WriteJson(os.path.join(folder, JOB_FILE), content)
 
-    def _RecordHost(self, folder):
-        """job.json's HOST_KEY as written (any shape), None when there is
-        none or the file cannot be read."""
+    def _RecordKey(self, folder, key):
+        """job.json's private ``key`` as written (any shape), None when
+        there is none or the file cannot be read."""
         with self._filesLock:
             try:
                 with open(os.path.join(folder, JOB_FILE),
@@ -922,7 +935,18 @@ class PluginJobs:
                     raw = json.load(file)
             except (OSError, ValueError):
                 return None
-        return raw.get(HOST_KEY) if isinstance(raw, Mapping) else None
+        return raw.get(key) if isinstance(raw, Mapping) else None
+
+    def _RecordHost(self, folder):
+        """job.json's HOST_KEY as written (any shape), None when there is
+        none or the file cannot be read."""
+        return self._RecordKey(folder, HOST_KEY)
+
+    def _HookRun(self, folder, record):
+        """Whether a run read back is a hook run kept as one (a sample run
+        is kept like a manual run)."""
+        return (record.trigger.kind is TriggerKind.HOOK
+                and self._RecordKey(folder, SAMPLE_KEY) is not True)
 
     # ── the lanes ──────────────────────────────────────────────────────
 
@@ -1210,10 +1234,12 @@ class PluginJobs:
 
     def Start(self, pluginId: str, jobId: str, trigger: Trigger,
               params: Mapping[str, Any], settings: Mapping[str, Any],
-              picks: Mapping[str, InputPick]) -> Union[RunRecord, Refused]:
+              picks: Mapping[str, InputPick], *,
+              sample: bool = False) -> Union[RunRecord, Refused]:
         """Start a run or say why not. Never calls onRunEnded / onLaneFreed
         (see the module): what fails before the launch is in the return
-        value only."""
+        value only. ``sample``: a hook trigger's sample run (TrySample),
+        kept like a manual run (nothing for another trigger)."""
         with self._lock:
             if self._closing:
                 return _Unavailable("shutting down")
@@ -1233,6 +1259,8 @@ class PluginJobs:
             return Refused(reason=StartRefusal.NEEDS_SETTINGS,
                            detail=", ".join(missing))
         run = _Run(plan, self._clock())
+        run.sample = bool(sample) and TriggerKind(plan.trigger.kind) \
+            is TriggerKind.HOOK
         with self._lock:
             if self._closing:
                 return _Unavailable("shutting down")
@@ -1382,7 +1410,7 @@ class PluginJobs:
             raise _Refusal(StartRefusal.INVALID_REQUEST, "a value is not JSON")
         with self._lock:
             record = run.Record()
-        self._WriteRecord(folder, record)
+        self._WriteRecord(folder, record, run.sample)
 
         manifest = plan.manifest
         apiUrl = self._apiUrl() if manifest.permissions.autona_api in (
@@ -1506,7 +1534,8 @@ class PluginJobs:
         """An ended run's files: job.json, inputs/, a hook run's folder, the
         keeping rules. Each step's failure is logged and the next tried."""
         folder = run.folder
-        steps = [("write job.json", lambda: self._WriteRecord(folder, record))]
+        steps = [("write job.json",
+                  lambda: self._WriteRecord(folder, record, run.sample))]
         if not run.plan.dev:
             steps.append(("remove inputs", lambda: _RemoveTree(
                 os.path.join(folder, INPUTS_DIR))))
@@ -1557,10 +1586,11 @@ class PluginJobs:
         return records, links
 
     def _Prune(self, pluginWork):
-        """Keep the newest RUNS_KEPT_PER_PLUGIN manual / action runs (a
-        running one counts and stays) and, per hook, the newest failed run
-        only. A folder whose job.json says running or cannot be read is
-        never removed; a link or junction named like a run is unlinked."""
+        """Keep the newest RUNS_KEPT_PER_PLUGIN manual / action / sample
+        runs (a running one counts and stays) and, per hook, the newest
+        failed run only. A folder whose job.json says running or cannot be
+        read is never removed; a link or junction named like a run is
+        unlinked."""
         active = self._ActiveIds(finishing=False)
         plugin = os.path.basename(pluginWork)
         records, links = self._Scan(pluginWork)
@@ -1569,7 +1599,7 @@ class PluginJobs:
         kept = []
         failedByHook = {}
         for folder, record in records:
-            hook = record.trigger.kind is TriggerKind.HOOK
+            hook = self._HookRun(folder, record)
             if (plugin, record.run_id) in active:
                 if not hook:
                     kept.append((record.run_id, folder, False))
@@ -1612,7 +1642,8 @@ class PluginJobs:
 
     def List(self, pluginId: str) -> Sequence[RunRecord]:
         """The plugin's manual / action runs, newest first (hook runs are
-        in the hook's history; the kept failed one answers Get)."""
+        in the hook's history; the kept failed one answers Get, and so does
+        a sample run, by the run_id its start answered)."""
         if not isinstance(pluginId, str) or not _PLUGIN_ID.fullmatch(pluginId):
             return []
         with self._lock:
@@ -1742,17 +1773,19 @@ class PluginJobs:
             swept = dataclasses.replace(
                 record, state=JobState.FAILED,
                 reason=EndReason.AUTONA_EXITED, finished_at=finishedAt)
-            if record.trigger.kind is TriggerKind.HOOK:
+            hook = self._HookRun(folder, record)
+            sample = record.trigger.kind is TriggerKind.HOOK and not hook
+            if hook:
                 swept = dataclasses.replace(swept, artifacts=())
             try:
-                self._WriteRecord(folder, swept)
+                self._WriteRecord(folder, swept, sample)
             except Exception as error:
                 logger.warning(f"Plugins: run {record.run_id} could not be "
                                f"marked failed: {_Failure(error)}")
                 continue
             if not dev:
                 _RemoveTree(os.path.join(folder, INPUTS_DIR))
-            if record.trigger.kind is TriggerKind.HOOK:
+            if hook:
                 _RemoveTree(os.path.join(folder, OUT_DIR))
             logger.info(f"Plugins: run {record.run_id} of {pluginId} was "
                         f"left running; marked failed")

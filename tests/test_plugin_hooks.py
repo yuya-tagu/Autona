@@ -102,8 +102,11 @@ class _Jobs:
         # A refusal to answer (instead of a run), once.
         self.refuse = None
         self.started = threading.Event()
+        # The run ids started with sample=True.
+        self.sampled = []
 
-    def start(self, pluginId, jobId, trigger, params, settings, picks):
+    def start(self, pluginId, jobId, trigger, params, settings, picks, *,
+              sample=False):
         if self.busy:
             return Refused(StartRefusal.BUSY, remaining_seconds=3)
         if self.refuse is not None:
@@ -112,6 +115,8 @@ class _Jobs:
         runId = f"20261126-000000-{len(self.calls):04d}"
         self.calls.append((pluginId, jobId, trigger, dict(params),
                            dict(settings), dict(picks), runId))
+        if sample:
+            self.sampled.append(runId)
         self.started.set()
         return RunRecord(run_id=runId, plugin=pluginId, job=jobId,
                          trigger=trigger, lane=Lane.LIGHT,
@@ -647,6 +652,8 @@ def test_a_dev_plugin_tries_the_golden_input_uncounted(setup):
     assert call[5]["match"].record == golden
     assert call[3] == {"style": "short"}
     assert call[2].hook == MATCH_KEY
+    # Marked a sample: PluginJobs keeps its folder like a manual run's.
+    assert jobs.sampled == [record.run_id]
     dispatcher.RunEnded(PLUGIN, MATCH_KEY,
                         _record(record.run_id, JobState.FAILED,
                                 reason=EndReason.ABNORMAL_EXIT))
@@ -1054,6 +1061,39 @@ def test_a_file_value_is_a_pick_id(setup, tmp_path):
     dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-1"})
     _run_once(dispatcher, clock, 0)
     assert jobs.calls[0][3]["logo"] == os.path.normpath(str(picked))
+
+
+def test_a_file_value_left_out_keeps_the_saved_path(setup, tmp_path):
+    # The page shows a saved file by its name and sends a pick id only when
+    # the user picks again: a file / folder key left out of an enable keeps
+    # the path saved before (not the default); one given replaces it.
+    registry, jobs, clock, make, _ = setup
+    first, second = tmp_path / "a.png", tmp_path / "b.png"
+    first.write_bytes(b"png")
+    second.write_bytes(b"png")
+    plugin = registry.plugins[PLUGIN]
+    manifest = plugin.report.manifest
+    image = manifest.jobs[1]
+    image = dataclasses.replace(image, params=image.params + (
+        Field(key="logo", type="file", label="Logo", extensions=("png",)),))
+    registry.plugins[PLUGIN] = dataclasses.replace(
+        plugin, report=ManifestReport(dataclasses.replace(
+            manifest, jobs=(manifest.jobs[0], image))))
+    picks = {"pick-1": str(first), "pick-2": str(second)}
+    dispatcher = make(resolvePick=lambda kind, pickId: picks.get(pickId))
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-1"})
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, False, {})
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"count": 2})
+    assert status.params["logo"] == os.path.normpath(str(first))
+    assert status.params["count"] == 2
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-2"})
+    assert status.params["logo"] == os.path.normpath(str(second))
+    # An explicit null is not "left out": the default (none) again.
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": None})
+    assert status.params["logo"] is None
+    # The start runs with the values saved last.
+    _run_once(dispatcher, clock, 0)
+    assert jobs.calls[0][3]["logo"] is None
 
 
 # ── Refresh, samples, unusable, Forget (review S8) ──────────────────────
