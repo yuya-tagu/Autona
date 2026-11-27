@@ -372,6 +372,15 @@ class StartRefusal(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+# The start of Refused.detail for an INVALID_REQUEST whose source input
+# could not be filled (PluginJobs: PluginInputs.Prepare refused it, or a
+# required one came out empty -- the trigger's image gone, a record no
+# longer readable). Not the saved values' fault: a hook's history says
+# discarded with this reason, the hook stays enabled (never
+# params_changed) and nothing is counted.
+INPUT_UNAVAILABLE = "input_unavailable"
+
+
 class ProblemScope(StrEnum):
     PLUGIN = "plugin"
     JOB = "job"
@@ -1296,10 +1305,11 @@ class PluginJobs(Protocol):
     ``onRunEnded(record: RunRecord)`` for every run's end
     (PluginHooks.RunEnded for a hook's) and ``onLaneFreed(lane: Lane)``
     when a lane becomes free (PluginHooks.LaneFreed for the light one).
-    **Start never calls them**: a start refused after its lane was reserved
-    gives the lane back without onLaneFreed (a hook held meanwhile waits
-    for the next free lane), and a run cancelled while being prepared is
-    returned by Start ended (CANCELLED) without onRunEnded.
+    **Start never calls onRunEnded**: a run cancelled while being prepared
+    is returned by Start ended (CANCELLED). A start that gives back the
+    lane it reserved (refused after the reservation, or that run
+    cancelled) calls onLaneFreed on the caller's thread, so a hook held
+    meanwhile is tried again.
 
     A hook's run: its job folder is removed when it ends, except the last
     failed one of each hook (request.json and worker.log kept for 'see the
@@ -1318,14 +1328,23 @@ class PluginJobs(Protocol):
         are the job's value fields (file / folder already resolved paths),
         ``settings`` PluginSettings.Get's. ``sample``: a hook trigger's
         sample run, kept like a manual run (above; nothing for another
-        trigger). Calls neither callback (above); a run cancelled while
-        being prepared comes back as its record, CANCELLED. UNAVAILABLE
-        after Shutdown, or when the host cannot write the run's folder
-        (detail)."""
+        trigger). Never calls onRunEnded, and onLaneFreed only for a lane
+        it gave back (above); a run cancelled while being prepared comes
+        back as its record, CANCELLED. A manual / action start refused BUSY
+        marks the lane (UserWaiting). INVALID_REQUEST with a detail
+        starting INPUT_UNAVAILABLE when a source input could not be filled.
+        UNAVAILABLE after Shutdown, or when the host cannot write the run's
+        folder (detail)."""
 
     def BusyFor(self, lane: Lane) -> Optional[Refused]:
         """BUSY (with the remaining time when known) if ``lane`` is full,
         None when free."""
+
+    def UserWaiting(self, lane: Lane) -> bool:
+        """Whether ``lane`` is free and a manual / action start was refused
+        BUSY while it was held last (ADR-009 D.3: the dispatcher holds the
+        pending hooks a short grace so that request goes first). False
+        again once the lane is taken."""
 
     def Claim(self, lane: Lane, owner: str) -> bool:
         """Take ``lane`` for ``owner`` (a plugin id: the built-in vodsplit
@@ -1427,7 +1446,9 @@ class PluginHooks(Protocol):
         """One result image saved to out/results (only queues)."""
 
     def LaneFreed(self) -> None:
-        """The light lane is free: start the oldest pending hook."""
+        """The light lane is free: start the oldest pending hook (after the
+        user's grace when PluginJobs.UserWaiting says a manual / action
+        request was refused BUSY meanwhile, D.3)."""
 
     def RunEnded(self, pluginId: str, hookKey: str,
                  record: RunRecord) -> None:
@@ -1452,7 +1473,9 @@ class PluginHooks(Protocol):
         pending hooks are discarded when they would start (DISABLED).
         PARAMS_CHANGED is the dispatcher's own, per hook: a saved value no
         longer fits the job (an update changed its fields), or the start
-        was refused INVALID_REQUEST."""
+        was refused INVALID_REQUEST (not for INPUT_UNAVAILABLE: discarded,
+        the hook stays on). OSError when the hooks' record could not be
+        written (unreadable, or the save failed); memory has them off."""
 
     def TrySample(self, pluginId: str,
                   hookKey: str) -> Union[RunRecord, Refused]:

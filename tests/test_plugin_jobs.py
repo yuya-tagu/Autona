@@ -25,7 +25,7 @@ from loguru import logger
 from src.core.PluginJobs import (HOST_KEY, CheckArtifact, HostAlive,
                                   PluginJobs, RecordJson, ThisHost)
 from src.core.PluginTypes import (
-    RUN_ID_PATTERN, Action, ActionTarget, Artifact, ArtifactKind,
+    INPUT_UNAVAILABLE, RUN_ID_PATTERN, Action, ActionTarget, Artifact, ArtifactKind,
     ArtifactRejection, Badge, DoneEvent, EndReason, ErrorEvent, Field,
     FieldType, Hook, HookEvent, InputFile, InputPick, Job, JobState, Lane,
     LogEvent, Manifest, ManifestCheck, ManifestProblem, ManifestReport,
@@ -529,10 +529,14 @@ def test_requests_that_do_not_fit_are_refused(env):
     assert start(PLUGIN, "post_image", ACTION, {}, {}, {}).reason \
         is StartRefusal.INVALID_REQUEST
     assert env.runner.started == []
-    # A refusal after the lane was reserved gives it back without a
-    # callback (Start calls none) and leaves no folder.
+    # A refusal after the lane was reserved gives it back (onLaneFreed, so
+    # a pending hook is tried again; never onRunEnded) and leaves no folder.
+    # The unknown choice is one (its input could not be filled): its
+    # detail says the input, not the values (a hook stays on).
+    assert start(PLUGIN, "post", MANUAL, {}, {}, {"log": InputPick(
+        key="log", kind=FieldType.MATCH_LOG, choice="bogus")}).detail         .startswith(INPUT_UNAVAILABLE)
     assert env.jobs.BusyFor(Lane.LIGHT) is None
-    assert env.freed == [] and env.ended == []
+    assert env.freed == [Lane.LIGHT, Lane.LIGHT] and env.ended == []
     assert list((env.work / "plugins" / PLUGIN).iterdir()) == []
 
 
@@ -716,7 +720,8 @@ def test_a_runner_that_raises_gives_the_lane_back(env):
     refused, log = _Logged(env.StartPost)
     assert refused.reason is StartRefusal.UNAVAILABLE
     assert env.jobs.BusyFor(Lane.LIGHT) is None
-    assert env.freed == [] and env.ended == []
+    # The lane given back is told (a pending hook is tried again).
+    assert env.freed == [Lane.LIGHT] and env.ended == []
     assert list((env.work / "plugins" / PLUGIN).iterdir()) == []
     # The exception's type and errno only, never its path.
     assert "(ENOENT)" in log and "someone" not in log
@@ -729,7 +734,7 @@ def test_any_failure_while_preparing_gives_the_lane_back(env):
     refused, log = _Logged(env.StartPost)
     assert refused.reason is StartRefusal.UNAVAILABLE
     assert env.jobs.BusyFor(Lane.LIGHT) is None
-    assert env.freed == [] and env.runner.started == []
+    assert env.freed == [Lane.LIGHT] and env.runner.started == []
     assert "RuntimeError" in log and "someone" not in log
     env.inputs.during = None
     assert env.StartPost().state is JobState.RUNNING
@@ -752,8 +757,8 @@ def test_a_cancel_while_preparing_launches_nothing(env):
     assert record.state is JobState.CANCELLED and record.cancel_requested
     assert env.runner.started == []
     assert env.jobs.BusyFor(Lane.LIGHT) is None
-    # Returned by Start: no callback.
-    assert env.ended == [] and env.freed == []
+    # Returned by Start: no onRunEnded; the lane given back is told.
+    assert env.ended == [] and env.freed == [Lane.LIGHT]
     job = json.loads((env.RunFolder(record) / "job.json")
                      .read_text(encoding="utf-8"))
     assert job["state"] == "cancelled"
@@ -831,6 +836,31 @@ def test_a_hook_run_folder_is_removed_but_the_last_failed_one(env):
     env.End(4, _Done())
     assert [r.run_id for r in env.jobs.List(PLUGIN)] == [manual.run_id]
     assert env.jobs.Get(PLUGIN, second.run_id).state is JobState.ERROR
+
+
+def test_a_user_refused_busy_is_waiting_once_the_lane_frees(env):
+    # D.3: the dispatcher holds the pending hooks for that request.
+    hook = _StartHook(env)
+    assert not env.jobs.UserWaiting(Lane.LIGHT)
+    assert env.StartPost().reason is StartRefusal.BUSY
+    # Still held: not waiting yet (the lane is not free).
+    assert not env.jobs.UserWaiting(Lane.LIGHT)
+    env.End(0, _Done())
+    assert env.ended[-1].run_id == hook.run_id
+    assert env.jobs.UserWaiting(Lane.LIGHT)
+    # The request pressed again takes the lane: no longer waiting.
+    manual = env.StartPost()
+    assert manual.state is JobState.RUNNING
+    assert not env.jobs.UserWaiting(Lane.LIGHT)
+    env.End(1, _Done())
+    assert not env.jobs.UserWaiting(Lane.LIGHT)
+    env.clock.Advance(1)
+    # A hook refused busy is not the user's.
+    again = env.StartPost()
+    assert _StartHook(env).reason is StartRefusal.BUSY
+    env.End(2, _Done())
+    assert again.run_id == env.ended[-1].run_id
+    assert not env.jobs.UserWaiting(Lane.LIGHT)
 
 
 def _StartSample(env):

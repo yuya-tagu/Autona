@@ -29,16 +29,25 @@ the lane is free):
    ``expired``);
 2. the pending slots are started oldest first while the light lane is free
    (``busy``, then the start's own BUSY refusal: a manual / action run that
-   took the lane keeps the hook pending, so the user's runs go first);
+   took the lane keeps the hook pending, so the user's runs go first). The
+   user's request first (D.3): when a manual / action start was refused
+   BUSY while the lane was held (``userWaiting``, PluginJobs.UserWaiting),
+   the pending slots wait USER_GRACE_SECONDS from the moment the lane is
+   seen free, so the request pressed again takes the lane; then they start
+   (a start that took the lane meanwhile ends the grace);
 3. right before a start, the saved values are checked against the job's
    fields again (a plugin update may have changed them): values that no
    longer fit -- or a start refused INVALID_REQUEST -- disable the hook
-   (``params_changed``: its values have to be confirmed again, D.6);
+   (``params_changed``: its values have to be confirmed again, D.6). A
+   refusal for the trigger's input (detail INPUT_UNAVAILABLE: the image
+   gone, the record unreadable) is not the values' fault: ``discarded``,
+   ``input_unavailable``, the hook stays on and nothing is counted;
 4. then the 60 s sliding window: HOOK_RATE_WINDOW_MAX_STARTS started in it
    already skips this one (``skipped_rate_limit``; not kept pending);
 5. right after a start, the 1 h sliding window: more than
    HOOK_HOUR_WINDOW_MAX_STARTS in it disables the hook (``rate_limit``).
-   Enabling a hook again empties its windows.
+   Enabling a hook that was off empties its windows and its failures
+   (saving the values of one already on keeps them).
 
 A start refused for missing settings is ``needs_settings`` in the history
 and counts nothing (D.5); one refused otherwise (blocked, disabled,
@@ -69,7 +78,13 @@ enabled (SettingsManager's way). One that cannot be opened now (an
 antivirus or sync tool holding it) leaves the plugin *unreadable*: nothing
 is saved over it, enabling answers UNAVAILABLE, and every access tries to
 read it again. Reading again (``Refresh``) that fails keeps what memory
-has.
+has. A save that failed (an auto-disable, Forget) leaves memory ahead of
+the file: until a save succeeds, reading again saves instead (memory wins,
+so an auto-disable does not come back). A hooks.json gone (a new install
+empties the plugin's user_data folder) is read as no hook on, keeping the
+``new_install`` reason memory has for the rows. ``Forget`` raises OSError
+when it could not write (the file unreadable or the save failed): the
+installer stops there; memory has the hooks off all the same.
 
 When nothing runs (D.7): the headless shell (``headless`` at construction:
 nothing is queued, nothing can be enabled), after ``Shutdown`` (the
@@ -100,8 +115,8 @@ flags.
 The dispatcher (``Pump``) and the SHELL calls (``SetEnabled`` / ``Status``
 / ``Forget`` / ``TrySample`` / ``Refresh``) hold ``_stateLock`` (not
 re-entrant) for the hooks' state, their files and the starts. Under it they
-call the registry (``Get`` / ``HookJobs``), ``busy()``, ``settings()`` and
-``start`` -- PluginJobs.Start, which prepares the inputs (the state at the
+call the registry (``Get`` / ``HookJobs``), ``busy()``,
+``userWaiting()``, ``settings()`` and ``start`` -- PluginJobs.Start, which prepares the inputs (the state at the
 trigger: StateManager.lock; the match log: MatchLogService.Flush) and
 launches a process (seconds, with an antivirus scanning it; Status waits
 meanwhile). So the order is ``_stateLock`` -> the registry's, PluginJobs',
@@ -132,7 +147,8 @@ from .PluginTypes import (
     HOOK_CONSECUTIVE_FAILURES_DISABLE, HOOK_FILLS, HOOK_HISTORY_PER_HOOK,
     HOOK_HOUR_WINDOW_MAX_STARTS, HOOK_HOUR_WINDOW_SECONDS,
     HOOK_PENDING_MAX_SECONDS, HOOK_RATE_WINDOW_MAX_STARTS,
-    HOOK_RATE_WINDOW_SECONDS, MATCH_DECIDED_HOLD_SECONDS, SOURCE_FIELD_TYPES,
+    HOOK_RATE_WINDOW_SECONDS, INPUT_UNAVAILABLE, MATCH_DECIDED_HOLD_SECONDS,
+    SOURCE_FIELD_TYPES,
     Badge, EndReason, ErrorEvent, FieldType, HookDisabledReason, HookEvent,
     HookHistoryEntry, HookOutcome, HookStatus, InputPick, JobState, Refused,
     RunRecord, StartRefusal, Trigger, TriggerKind)
@@ -149,6 +165,9 @@ SAMPLE_FILES = MappingProxyType({
 })
 # The newest records marked fired that are kept (one per match).
 FIRED_KEPT = 1000
+# D.3: how long the pending hooks wait, once the light lane is free, when a
+# manual / action start was refused BUSY while it was held (userWaiting).
+USER_GRACE_SECONDS = 5.0
 
 # History reasons of the host's own (besides an EndReason / error code /
 # StartRefusal value).
@@ -156,6 +175,7 @@ REASON_EXPIRED = "expired"
 REASON_UNUSABLE = "unusable"
 REASON_INVALID_PARAMS = "invalid_params"
 REASON_START_FAILED = "start_failed"
+REASON_INPUT_UNAVAILABLE = INPUT_UNAVAILABLE
 
 # The last error of a failed run (no error event): code = the EndReason.
 _FAILED_MESSAGES = MappingProxyType({
@@ -205,14 +225,18 @@ class _Pending:
 
 class _Plugin:
     """A plugin's hooks as read from its hooks.json. ``unreadable``: the
-    file is there but could not be opened; nothing is saved over it."""
+    file is there but could not be opened; nothing is saved over it.
+    ``unsaved``: the last save failed (memory is ahead of the file).
+    ``absent``: read when there was no file."""
 
-    __slots__ = ("dev", "hooks", "unreadable")
+    __slots__ = ("dev", "hooks", "unreadable", "unsaved", "absent")
 
     def __init__(self, dev):
         self.dev = dev
         self.hooks = {}
         self.unreadable = False
+        self.unsaved = False
+        self.absent = False
 
 
 class PluginHooks:
@@ -223,7 +247,8 @@ class PluginHooks:
 
     def __init__(self, userDataDir, registry, start, *, busy=None,
                  settings=None, resolvePick=None, clock=None,
-                 wallClock=None, headless=False, samplesDir=None):
+                 wallClock=None, headless=False, samplesDir=None,
+                 userWaiting=None):
         """`userDataDir`: the ``user_data`` folder (hooks.json lives under
         its ``plugins/``). `registry`: a PluginRegistry (``Get`` /
         ``HookJobs``). `start`: PluginJobs.Start. `busy()`: whether the
@@ -235,7 +260,10 @@ class PluginHooks:
         paths, for file / folder values sent to SetEnabled (PluginSettings'
         PickResolver). `clock()`: monotonic seconds; `wallClock()`: an
         aware datetime for the history. `headless`: never queue nor run.
-        `samplesDir`: the golden inputs for TrySample."""
+        `samplesDir`: the golden inputs for TrySample. `userWaiting()`:
+        whether the light lane is free and a manual / action start was
+        refused BUSY while it was held (PluginJobs.UserWaiting; None:
+        never), for the grace of D.3."""
         self._userDataDir = userDataDir
         self._registry = registry
         self._start = start
@@ -246,6 +274,7 @@ class PluginHooks:
         self._wallClock = wallClock or (lambda: datetime.now().astimezone())
         self._headless = bool(headless)
         self._samplesDir = samplesDir
+        self._userWaiting = userWaiting
 
         # The leaf lock: the inbox, the enabled-events flags, the next due
         # time, stopping.
@@ -265,6 +294,10 @@ class PluginHooks:
         self._seq = 0
         # Sample runs' ids: their ends count nothing.
         self._samples = set()
+        # D.3: the clock until which the pending hooks wait for the user's
+        # request (None: no grace going; past: spent until the lane is
+        # taken again).
+        self._graceUntil = None
 
     # ── lifetime ─────────────────────────────────────────────────────────
 
@@ -409,11 +442,14 @@ class PluginHooks:
                 if isinstance(values, Refused):
                     return values
                 entry = state.hooks.setdefault(hookKey, _Hook())
+                if not entry.enabled:
+                    # Off -> on: a fresh start. Saving the values of one
+                    # already on keeps its windows and failures.
+                    entry.failures = 0
+                    entry.starts.clear()
                 entry.enabled = True
                 entry.params = values
                 entry.disabledReason = None
-                entry.failures = 0
-                entry.starts.clear()
             else:
                 entry = state.hooks.setdefault(hookKey, _Hook())
                 entry.enabled = False
@@ -446,7 +482,9 @@ class PluginHooks:
         reconsent also put the values back to the defaults and the failures
         to 0 (D.6, D.7); a new install also clears the history and the last
         error (another plugin now). A removal's is called before the
-        plugin's user_data folder is removed."""
+        plugin's user_data folder is removed. OSError when hooks.json could
+        not be written (unreadable, or the save failed): memory has the
+        hooks off all the same."""
         reason = HookDisabledReason(reason)
         with self._stateLock:
             state = self._Loaded(pluginId)
@@ -461,9 +499,11 @@ class PluginHooks:
                 if reason == HookDisabledReason.NEW_INSTALL:
                     entry.history = []
                     entry.lastError = None
-            if state.hooks:
-                self._Save(pluginId)
             self._Recount()
+            if state.unreadable:
+                raise OSError("hooks.json unreadable")
+            if state.hooks and not self._Save(pluginId):
+                raise OSError("hooks.json not written")
 
     def TrySample(self, pluginId, hookKey):
         """A dev plugin's 'try with the sample input' (D.6): one start with
@@ -505,8 +545,10 @@ class PluginHooks:
                 Trigger(TriggerKind.HOOK, event=event, hook=hookKey),
                 params, settings, {pick.key: pick}, sample=True)
             # Its folder stays like a manual run's (PluginJobs); its end
-            # is not counted (_Ended).
-            if isinstance(result, RunRecord):
+            # is not counted (_Ended). One cancelled while being prepared
+            # comes back ended, with no onRunEnded to wait for.
+            if (isinstance(result, RunRecord)
+                    and result.state != JobState.CANCELLED):
                 self._samples.add(result.run_id)
             return result
 
@@ -514,10 +556,11 @@ class PluginHooks:
 
     def Pump(self):
         """One round of the dispatcher (its thread calls it; tests call it
-        with a fake clock): drop the pending triggers waited too long, take
-        the inbox one item at a time (each trigger is started at once while
-        the lane is free), fire the candidates held long enough, start the
-        pending ones while the light lane is free. One item that fails is
+        with a fake clock): start the pending ones while the light lane is
+        free (before any could be dropped), drop the pending triggers
+        waited too long, take the inbox one item at a time (each trigger is
+        started at once while the lane is free), fire the candidates held
+        long enough, start the pending ones again. One item that fails is
         dropped and logged; the others go on."""
         with self._cond:
             if self._stopping:
@@ -526,6 +569,7 @@ class PluginHooks:
             self._inbox.clear()
         with self._stateLock:
             now = self._clock()
+            self._Guarded(self._StartPending, now)
             self._Guarded(self._Expire, now)
             for at, item in items:
                 self._Guarded(self._Take, item, at)
@@ -616,7 +660,9 @@ class PluginHooks:
 
     def _StartPending(self, now):
         """The pending triggers, oldest first, while the lane is free and
-        not stopping."""
+        not stopping, and not in the user's grace (D.3)."""
+        if self._InGrace(now):
+            return
         for pluginId, key, entry in self._Pendings():
             if self._Stopping():
                 return
@@ -624,6 +670,21 @@ class PluginHooks:
                 return
             if self._StartOne(pluginId, key, entry, now) is False:
                 return
+
+    def _InGrace(self, now):
+        """D.3: whether the pending hooks wait for the user's request. The
+        grace starts the first time the lane is seen free with a manual /
+        action start refused while it was held, lasts USER_GRACE_SECONDS,
+        and is spent until the lane is taken again (userWaiting false)."""
+        waiting = self._userWaiting is not None and self._userWaiting()
+        if not waiting:
+            self._graceUntil = None
+            return False
+        if self._graceUntil is None:
+            self._graceUntil = now + USER_GRACE_SECONDS
+            logger.info("plugin hooks: the pending hooks wait for the "
+                        "user's request")
+        return now < self._graceUntil
 
     def _StartOne(self, pluginId, key, entry, now):
         """Start one pending trigger, or drop it. False when the lane was
@@ -673,6 +734,11 @@ class PluginHooks:
             entry.pending = None
             if result.reason == StartRefusal.NEEDS_SETTINGS:
                 self._Remember(entry, HookOutcome.NEEDS_SETTINGS)
+            elif (result.reason == StartRefusal.INVALID_REQUEST
+                  and (result.detail or "").startswith(INPUT_UNAVAILABLE)):
+                # The trigger's input, not the values: the hook stays on.
+                self._Remember(entry, HookOutcome.DISCARDED,
+                               reason=REASON_INPUT_UNAVAILABLE)
             elif result.reason == StartRefusal.INVALID_REQUEST:
                 self._Disable(entry, HookDisabledReason.PARAMS_CHANGED)
                 self._Remember(entry, HookOutcome.DISCARDED,
@@ -745,12 +811,17 @@ class PluginHooks:
         return found
 
     def _NextDue(self):
-        """The clock of the next candidate to fire or pending to drop (the
-        same sums Pump compares)."""
+        """The clock of the next candidate to fire, pending to drop or end
+        of the user's grace with a hook pending (the same sums Pump
+        compares)."""
         dues = [firstAt + MATCH_DECIDED_HOLD_SECONDS
                 for firstAt, _line in self._candidates.values()]
+        pendings = self._Pendings()
         dues += [entry.pending.at + HOOK_PENDING_MAX_SECONDS
-                 for _id, _key, entry in self._Pendings()]
+                 for _id, _key, entry in pendings]
+        if (pendings and self._graceUntil is not None
+                and self._graceUntil > self._clock()):
+            dues.append(self._graceUntil)
         return min(dues) if dues else None
 
     def _StartThread(self):
@@ -854,6 +925,11 @@ class PluginHooks:
             state = None
         if (state is not None and not reload and not state.unreadable):
             return state
+        if state is not None and state.unsaved and not state.unreadable:
+            # The file is behind memory (a save failed): memory wins, so an
+            # auto-disable does not come back. Save it again instead.
+            self._Save(pluginId)
+            return state
         # Memory has nothing to keep yet: first read, or unreadable so far.
         fresh = self._Read(pluginId, dev,
                            first=state is None or state.unreadable)
@@ -865,6 +941,13 @@ class PluginHooks:
                 if key in fresh.hooks:
                     fresh.hooks[key].pending = entry.pending
                     fresh.hooks[key].starts = entry.starts
+                elif (fresh.absent and not entry.enabled and
+                      entry.disabledReason == HookDisabledReason.NEW_INSTALL):
+                    # The new install emptied user_data: the rows still
+                    # say why the hooks are off.
+                    kept = _Hook()
+                    kept.disabledReason = entry.disabledReason
+                    fresh.hooks[key] = kept
         self._plugins[pluginId] = fresh
         self._Recount()
         return fresh
@@ -880,6 +963,7 @@ class PluginHooks:
             with open(path, "rb") as handle:
                 content = handle.read()
         except FileNotFoundError:
+            fresh.absent = True
             return fresh
         except OSError as error:
             logger.warning(f"plugin hooks: a hooks.json could not be read "
@@ -914,15 +998,16 @@ class PluginHooks:
         return fresh
 
     def _Save(self, pluginId):
-        """Write the plugin's hooks.json (a temporary file, then replace).
-        Not over an unreadable one. A failure is logged; memory stays as it
-        is and the next save writes it."""
+        """Write the plugin's hooks.json (a temporary file, then replace):
+        True when written. Not over an unreadable one. A failure is logged
+        and marks the plugin unsaved; memory stays as it is and the next
+        save (or read again) writes it."""
         state = self._plugins.get(pluginId)
         if state is None:
-            return
+            return False
         if state.unreadable:
             logger.warning("plugin hooks: hooks.json unreadable, not saved")
-            return
+            return False
         path = self._Path(pluginId, state.dev)
         try:
             data = json.dumps({"hooks": {key: _ToJson(entry)
@@ -933,6 +1018,11 @@ class PluginHooks:
             logger.warning(
                 f"plugin hooks: hooks.json not written "
                 f"({type(error).__name__})")
+            state.unsaved = True
+            return False
+        state.unsaved = False
+        state.absent = False
+        return True
 
     def _Remember(self, entry, outcome, *, summary=None, reason=None,
                   runId=None):

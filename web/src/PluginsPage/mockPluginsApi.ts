@@ -300,7 +300,23 @@ export function createMockPluginsApi(
                 pending: false, failures: 0, disabled_reason: null,
                 last_error: null, history: []};
             row.enabled = enabled;
-            row.params = enabled ? {...(params ?? {})} : row.params;
+            // The real shape: SettingValues, a file / folder by its name;
+            // null resets to the default (the field is dropped).
+            if (enabled) {
+                const kept = {...row.params};
+                const job = need(id).jobs.find((j) => j.id === jobId);
+                for (const [k, v] of Object.entries(params ?? {})) {
+                    const type = job?.params?.find((f) => f.key === k)?.type;
+                    if (v === null) {
+                        delete kept[k];
+                    } else if (type === "file" || type === "folder") {
+                        kept[k] = {kind: "pick", name: String(v)};
+                    } else {
+                        kept[k] = {kind: "value", value: v};
+                    }
+                }
+                row.params = kept;
+            }
             row.disabled_reason = enabled ? null : "user";
             hookRows.set(id, [...rows.filter((r) => r.key !== key), row]);
             return clone(row);

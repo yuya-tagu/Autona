@@ -1747,5 +1747,12 @@
     "plugins_hook_outcome_overwritten": "Overwritten",
     "plugins_hook_outcome_discarded": "Discarded",
     "plugins_hook_outcome_skipped_rate_limit": "Skipped (limit)",
-    "plugins_hook_outcome_needs_settings": "Settings needed"
+    "plugins_hook_outcome_needs_settings": "Settings needed",
+    "plugins_reason_expired": "Not run: it waited too long and went stale.",
+    "plugins_reason_unusable": "This job cannot be used right now.",
+    "plugins_reason_invalid_params": "The saved values do not fit the fields.",
+    "plugins_reason_start_failed": "The job could not be started.",
+    "plugins_reason_input_unavailable": "Discarded: the input could not be prepared.",
+    "plugins_hook_load_failed": "The hooks could not be read. What is shown may be out of date.",
+    "plugins_hook_sample_running": "Running the sample..."
 }

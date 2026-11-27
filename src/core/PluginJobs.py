@@ -49,10 +49,17 @@ docs/plugins/contract_1.json request / job_record / refusals / limits):
 
 Callbacks: ``onRunEnded(record)``, then ``onLaneFreed(lane)``, outside
 both locks on the thread that ended the run (a runner thread), or that
-released a claim. **Start never calls them**: a start refused after its
-lane was reserved gives the lane back without onLaneFreed (a hook held
-meanwhile waits for the next free lane), and a run cancelled while being
-prepared is returned ended (CANCELLED) by Start and gets no onRunEnded.
+released a claim. **Start never calls onRunEnded**: a run cancelled while
+being prepared is returned ended (CANCELLED) by Start. A start that gives
+back the lane it reserved (refused after the reservation, or that run
+cancelled) calls onLaneFreed on the caller's thread, outside both locks, so
+a hook held meanwhile is not left waiting (PluginHooks.LaneFreed only
+queues: it may be called from inside the dispatcher's own start).
+
+The user's request first (ADR-009 D.3): a manual / action start refused
+BUSY marks its lane (``UserWaiting``) until the lane is taken again; the
+dispatcher asks it when the lane is free and holds the pending hooks a
+short grace, so the request pressed again after seeing BUSY takes the lane.
 
 Secrets: the PluginSecrets environment goes to the runner's
 BuildEnvironment only. A secret setting key is dropped from ``settings``
@@ -99,7 +106,7 @@ from loguru import logger
 from .PluginTypes import (
     ACTION_FILLS, CONTEXT_ONLY_TYPES, ERROR_HINT_MAX_LENGTH,
     ERROR_MESSAGE_MAX_LENGTH, HOOK_FILLS, HOOK_TIMEOUT_CAP_SECONDS,
-    HOST_SPEAKS_PROTOCOLS, IMAGE_ARTIFACT_EXTENSIONS,
+    HOST_SPEAKS_PROTOCOLS, IMAGE_ARTIFACT_EXTENSIONS, INPUT_UNAVAILABLE,
     IMAGE_ARTIFACT_MAX_BYTES, INPUTS_DIR, JOB_FILE, LABEL_MAX_LENGTH,
     LOG_FILE, LOG_MESSAGE_MAX_LENGTH, MAX_ARTIFACTS, MAX_WARNINGS, OUT_DIR,
     PLUGIN_ID_PATTERN, REQUEST_FILE, RUN_ID_PATTERN, RUNS_KEPT_PER_PLUGIN,
@@ -846,6 +853,9 @@ class PluginJobs:
         self._launched = threading.Condition(self._lock)
         self._filesLock = threading.Lock()
         self._lanes: dict = {Lane.HEAVY: None, Lane.LIGHT: None}
+        # Per lane: a manual / action start was refused BUSY since the lane
+        # was last taken (UserWaiting).
+        self._userRefused: dict = {Lane.HEAVY: False, Lane.LIGHT: False}
         # Plugin id -> how many holds keep its starts refused (a swap, a
         # removal, a disable, a block: Hold / Unhold), and how many holds it
         # has had (a start planned before one is refused at its lane).
@@ -976,6 +986,14 @@ class PluginJobs:
         with self._lock:
             return self._BusyLocked(lane)
 
+    def UserWaiting(self, lane: Lane) -> bool:
+        """Whether ``lane`` is free and a manual / action start was refused
+        BUSY while it was held last (D.3: the dispatcher lets that request
+        go first). False again once the lane is taken."""
+        lane = Lane(lane)
+        with self._lock:
+            return self._lanes[lane] is None and self._userRefused[lane]
+
     def Claim(self, lane: Lane, owner: str) -> bool:
         """Take ``lane`` for another owner (the built-in vodsplit on the
         heavy one): True when it was free. Refused while shutting down."""
@@ -984,6 +1002,7 @@ class PluginJobs:
             if self._closing or self._lanes[lane] is not None:
                 return False
             self._lanes[lane] = _Claim(owner)
+            self._userRefused[lane] = False
             return True
 
     def Release(self, lane: Lane, owner: str) -> None:
@@ -1272,8 +1291,12 @@ class PluginJobs:
                                     "removed")
             busy = self._BusyLocked(plan.lane)
             if busy is not None:
+                if TriggerKind(plan.trigger.kind) in (TriggerKind.MANUAL,
+                                                      TriggerKind.ACTION):
+                    self._userRefused[plan.lane] = True
                 return busy
             self._lanes[plan.lane] = run
+            self._userRefused[plan.lane] = False
 
         try:
             spec = self._Prepare(run)
@@ -1324,13 +1347,18 @@ class PluginJobs:
 
     def _GiveBack(self, run):
         """A reserved lane back after a refused start (the folder made so
-        far removed). No onLaneFreed: Start calls no callback."""
+        far removed), then onLaneFreed (see the module)."""
         with self._lock:
-            if self._lanes[run.lane] is run:
+            freed = self._lanes[run.lane] is run
+            if freed:
                 self._lanes[run.lane] = None
             run.ended = True
-        if run.folder is not None:
-            _RemoveRun(run.folder)
+        try:
+            if run.folder is not None:
+                _RemoveRun(run.folder)
+        finally:
+            if freed:
+                self._Call(self._onLaneFreed, run.lane)
 
     def _NewRunFolder(self, run):
         pluginWork = self._PluginWork(run.pluginId, make=True)
@@ -1382,10 +1410,11 @@ class PluginJobs:
                 item = self._inputs.Prepare(key, kind, inputsDir, pick)
             except (LookupError, ValueError, TypeError):
                 raise _Refusal(StartRefusal.INVALID_REQUEST,
-                               f"{key} could not be filled")
+                               f"{INPUT_UNAVAILABLE}: {key} could not be "
+                               "filled")
             if item is None and required:
                 raise _Refusal(StartRefusal.INVALID_REQUEST,
-                               f"{key} is not filled")
+                               f"{INPUT_UNAVAILABLE}: {key} is not filled")
             inputs[key] = item
 
         locale = self._locale() or ""
@@ -1477,8 +1506,9 @@ class PluginJobs:
 
     def _Finish(self, run, outcome: RunOutcome, callbacks=True):
         """A run's end (the runner's onEnd, or a run cancelled before its
-        launch with ``callbacks`` False): the record, job.json, the
-        folders, then the callbacks -- always, whatever failed before."""
+        launch with ``callbacks`` False: no onRunEnded, still onLaneFreed):
+        the record, job.json, the folders, then the callbacks -- always,
+        whatever failed before."""
         final = outcome.final
         try:
             accepted, hostWarnings = self._Checked(run, final,
@@ -1527,7 +1557,7 @@ class PluginJobs:
                            else ""))
             if callbacks:
                 self._Call(self._onRunEnded, record)
-                self._Call(self._onLaneFreed, run.lane)
+            self._Call(self._onLaneFreed, run.lane)
         return record
 
     def _Settle(self, run, record):

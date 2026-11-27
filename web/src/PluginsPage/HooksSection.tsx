@@ -4,6 +4,7 @@ import {
     Box,
     Button,
     Chip,
+    LinearProgress,
     Dialog,
     DialogActions,
     DialogContent,
@@ -20,7 +21,6 @@ import {
     HookRow,
     PluginDetail,
     PluginJob,
-    SettingValue,
 } from "./pluginTypes";
 import {pluginText, startedText} from "./pluginText";
 import FieldForm from "./FieldForm";
@@ -33,7 +33,6 @@ import {
 } from "./formFields";
 import RunView, {
     pickErrorText,
-    reasonText,
     refusalText,
     usePolledRun,
 } from "./RunView";
@@ -50,25 +49,20 @@ function valueFields(job: PluginJob) {
     return (job.params ?? []).filter((f) => fieldKind(f) === "value");
 }
 
-// The saved values as the form reads them (a file / folder by its name).
-function savedOf(job: PluginJob,
-                 params: Record<string, unknown>): Record<string, SettingValue> {
-    const saved: Record<string, SettingValue> = {};
-    for (const field of valueFields(job)) {
-        if (!(field.key in params)) {
-            continue;
-        }
-        const value = params[field.key];
-        saved[field.key] = field.type === "file" || field.type === "folder"
-            ? {kind: "pick", name: typeof value === "string" ? value : null}
-            : {kind: "value", value};
-    }
-    return saved;
-}
-
 export function hookOutcomeText(outcome: string): string {
     const key = `plugins_hook_outcome_${outcome}`;
     return i18n.exists(key) ? i18n.t(key) : outcome;
+}
+
+// A history reason: the host's own (expired ...), an end reason, or a
+// refusal; one not known shows as its code.
+export function hookReasonText(reason: string): string {
+    for (const prefix of ["plugins_reason_", "plugins_refuse_"]) {
+        if (i18n.exists(`${prefix}${reason}`)) {
+            return i18n.t(`${prefix}${reason}`);
+        }
+    }
+    return reason;
 }
 
 function disabledText(row: HookRow): string | null {
@@ -85,15 +79,19 @@ function HookForm({api, job, row, language, onSave, onClose, onError}: {
     job: PluginJob;
     row: HookRow | undefined;
     language: string;
-    onSave: (params: Record<string, unknown>) => Promise<void>;
+    onSave: (params: Record<string, unknown>) => Promise<boolean>;
     onClose: () => void;
     onError: (text: string) => void;
 }) {
     const fields = valueFields(job);
     const [values, setValues] = React.useState<FormValues>(
-        () => initialValues(fields, savedOf(job, row?.params ?? {})));
+        () => initialValues(fields, row?.params ?? {}));
     const [tried, setTried] = React.useState(false);
     const [saving, setSaving] = React.useState(false);
+    const alive = React.useRef(true);
+    React.useEffect(() => () => {
+        alive.current = false;
+    }, []);
 
     const save = async () => {
         setTried(true);
@@ -102,9 +100,14 @@ function HookForm({api, job, row, language, onSave, onClose, onError}: {
         }
         setSaving(true);
         try {
-            await onSave(collectValues(fields, values).params);
+            // clearing: a file / folder let go is sent as null (the host
+            // resets it); one left out keeps the saved path.
+            await onSave(collectValues(
+                fields, values, {clearing: true}).params);
         } finally {
-            setSaving(false);
+            if (alive.current) {
+                setSaving(false);
+            }
         }
     };
 
@@ -161,7 +164,7 @@ function History({entries, language}: {
                     {[startedText(entry.at, language),
                       hookOutcomeText(entry.outcome),
                       pluginText(entry.summary, language),
-                      entry.reason ? reasonText(entry.reason) : ""]
+                      entry.reason ? hookReasonText(entry.reason) : ""]
                         .filter(Boolean).join(" · ")}
                 </Typography>
             ))}
@@ -197,15 +200,22 @@ function HookItem({api, plugin, job, hook, row, language, onChanged, onError}: {
             && e.run_id) : undefined;
     const fields = valueFields(job);
 
-    const put = async (on: boolean, params?: Record<string, unknown>) => {
+    // Whether the host took it; a failure is shown and the caller's dialog
+    // stays open with its input.
+    const put = async (on: boolean,
+                       params?: Record<string, unknown>): Promise<boolean> => {
         try {
             const next = await api.setHook(plugin.id, job.id, hook.on, on,
                                            params);
             if (alive.current) {
                 onChanged(next);
             }
+            return true;
         } catch (error) {
-            onError(refusalText(error));
+            if (alive.current) {
+                onError(refusalText(error));
+            }
+            return false;
         }
     };
     const toggle = () => {
@@ -226,7 +236,10 @@ function HookItem({api, plugin, job, hook, row, language, onChanged, onError}: {
             (body) => alive.current && setLog(body),
             (e) => alive.current && onError(refusalText(e)));
     };
+    const sampleRunning = sampleId !== null && lost === null
+        && (!sample || sample.state === "running");
     const trySample = () => {
+        setSampleId(null);
         api.hookSample(plugin.id, job.id, hook.on).then(
             (started) => alive.current && setSampleId(started.run_id),
             (e) => alive.current && onError(refusalText(e)));
@@ -288,6 +301,7 @@ function HookItem({api, plugin, job, hook, row, language, onChanged, onError}: {
                 {plugin.badge === "dev" ? (
                     <Button size="small" variant="outlined"
                             data-testid={`plugin-hook-sample-${testKey}`}
+                            disabled={sampleRunning}
                             onClick={trySample}>
                         {i18n.t("plugins_hook_sample")}
                     </Button>
@@ -303,6 +317,20 @@ function HookItem({api, plugin, job, hook, row, language, onChanged, onError}: {
                     {log || i18n.t("plugins_log_empty")}
                 </Box>
             ) : null}
+            {sampleRunning ? (
+                <Box data-testid={`plugin-hook-sample-running-${testKey}`}>
+                    <Typography variant="caption">
+                        {i18n.t("plugins_hook_sample_running")}
+                    </Typography>
+                    <LinearProgress/>
+                </Box>
+            ) : null}
+            {sampleId && lost !== null ? (
+                <Alert severity="warning"
+                       data-testid={`plugin-hook-sample-lost-${testKey}`}>
+                    {i18n.t(`plugins_run_lost_${lost}`)}
+                </Alert>
+            ) : null}
             {sampleId && lost === null && sample
                 && sample.state !== "running" ? (
                 <RunView api={api} pluginId={plugin.id} run={sample}
@@ -314,10 +342,11 @@ function HookItem({api, plugin, job, hook, row, language, onChanged, onError}: {
                           onError={onError}
                           onClose={() => setEditing(false)}
                           onSave={async (params) => {
-                              await put(true, params);
-                              if (alive.current) {
+                              const ok = await put(true, params);
+                              if (ok && alive.current) {
                                   setEditing(false);
                               }
+                              return ok;
                           }}/>
             ) : null}
         </Stack>
@@ -332,6 +361,9 @@ export default function HooksSection({api, plugin, language, onError}: {
 }) {
     const id = plugin.id;
     const [rows, setRows] = React.useState<HookRow[]>([]);
+    const [loadFailed, setLoadFailed] = React.useState(false);
+    const jobs = plugin.jobs.filter((j) => (j.hooks ?? []).length > 0);
+    const hasHooks = jobs.length > 0;
     // The newest read of each wins; one for another plugin or after the
     // section is gone is dropped.
     const seq = React.useRef(0);
@@ -340,27 +372,41 @@ export default function HooksSection({api, plugin, language, onError}: {
         api.hooks(id).then((next) => {
             if (mine === seq.current) {
                 setRows(next);
+                setLoadFailed(false);
             }
-        }, () => undefined);
+        }, () => {
+            // The rows shown stay (as PR #404): only say the read failed.
+            if (mine === seq.current) {
+                setLoadFailed(true);
+            }
+        });
     }, [api, id]);
 
     React.useEffect(() => {
         setRows([]);
+        setLoadFailed(false);
+        if (!hasHooks) {
+            return undefined;
+        }
         read();
         const timer = window.setInterval(read, POLL_MS);
         return () => {
             window.clearInterval(timer);
             seq.current += 1;
         };
-    }, [read]);
+    }, [read, hasHooks]);
 
-    const jobs = plugin.jobs.filter((j) => (j.hooks ?? []).length > 0);
-    if (jobs.length === 0) {
+    if (!hasHooks) {
         return null;
     }
     return (
         <CardFrame title={i18n.t("plugins_hooks")}>
             <Note>{i18n.t("plugins_hooks_note")}</Note>
+            {loadFailed ? (
+                <Alert severity="warning" data-testid="plugin-hooks-load-failed">
+                    {i18n.t("plugins_hook_load_failed")}
+                </Alert>
+            ) : null}
             <Stack spacing={1} data-testid="plugin-hooks">
                 {jobs.flatMap((job) => (job.hooks ?? []).map((hook) => (
                     <HookItem key={`${job.id}/${hook.on}`} api={api}

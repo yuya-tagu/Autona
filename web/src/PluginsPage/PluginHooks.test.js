@@ -151,6 +151,116 @@ describe("hooks section", () => {
         await screen.findByTestId("plugin-run-view", {}, {timeout: 6000});
     });
 
+    // A detail whose export_log job also has a bool value field.
+    function withBool(api) {
+        const detail = api.detail;
+        api.detail = async (id) => {
+            const d = await detail(id);
+            d.jobs.forEach((j) => {
+                if (j.id === "export_log") {
+                    j.params.push({key: "verbose", type: "bool",
+                                   label: "Verbose"});
+                }
+            });
+            return d;
+        };
+    }
+    const SAVED = {
+        count: {kind: "value", value: 7},
+        verbose: {kind: "value", value: true},
+        folder: {kind: "pick", name: "OutDir"}};
+
+    test("changing the values shows what is saved and sends it back", async () => {
+        const api = createMockPluginsApi();
+        withBool(api);
+        api.hooks = async () => [row({enabled: true, params: SAVED})];
+        const set = jest.spyOn(api, "setHook");
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        fireEvent.click(await screen.findByTestId(`plugin-hook-edit-${KEY}`));
+        const form = await screen.findByTestId("plugin-hook-form");
+        expect(form.querySelector("input[type=number]").value).toBe("7");
+        expect(form.querySelector("input[type=checkbox]").checked).toBe(true);
+        expect(screen.getByTestId(
+            "plugin-hook-param-export_log-folder-name").textContent)
+            .toBe("OutDir");
+        fireEvent.click(screen.getByTestId("plugin-hook-form-save"));
+        // The file stays (left out); the others go back as they were.
+        await waitFor(() => expect(set).toHaveBeenCalledWith(
+            WEBHOOK, "export_log", "match_decided", true,
+            {count: 7, verbose: true}));
+    });
+
+    test("releasing a saved folder sends null for it", async () => {
+        const api = createMockPluginsApi();
+        api.hooks = async () => [row({enabled: true, params: SAVED})];
+        const set = jest.spyOn(api, "setHook");
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        fireEvent.click(await screen.findByTestId(`plugin-hook-edit-${KEY}`));
+        await screen.findByTestId("plugin-hook-form");
+        fireEvent.click(screen.getByText("Release"));
+        fireEvent.click(screen.getByTestId("plugin-hook-form-save"));
+        await waitFor(() => expect(set).toHaveBeenCalledWith(
+            WEBHOOK, "export_log", "match_decided", true,
+            {count: 7, folder: null}));
+    });
+
+    test("a failed save keeps the dialog open with its input", async () => {
+        const api = createMockPluginsApi();
+        api.hooks = async () => [row({enabled: true, params: SAVED})];
+        const set = jest.spyOn(api, "setHook").mockRejectedValue(
+            Object.assign(new Error("no"), {status: 400}));
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        fireEvent.click(await screen.findByTestId(`plugin-hook-edit-${KEY}`));
+        const form = await screen.findByTestId("plugin-hook-form");
+        fireEvent.click(screen.getByTestId("plugin-hook-form-save"));
+        await waitFor(() => expect(set).toHaveBeenCalled());
+        expect(screen.getByTestId("plugin-hook-form")).toBeTruthy();
+        expect(form.querySelector("input[type=number]").value).toBe("7");
+    });
+
+    test("a failed read says so and keeps the rows", async () => {
+        const api = createMockPluginsApi();
+        let calls = 0;
+        api.hooks = async () => {
+            calls += 1;
+            if (calls > 1) {
+                throw new Error("down");
+            }
+            return [row({enabled: true})];
+        };
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        const sw = await screen.findByTestId(`plugin-hook-switch-${KEY}`);
+        await waitFor(() => expect(sw.querySelector("input").checked)
+            .toBe(true));
+        // The next poll (5 s) fails.
+        await screen.findByTestId("plugin-hooks-load-failed", {},
+                                  {timeout: 8000});
+        expect(screen.getByTestId(`plugin-hook-switch-${KEY}`)
+            .querySelector("input").checked).toBe(true);
+    });
+
+    test("history reasons the host emits are in words", async () => {
+        const api = createMockPluginsApi();
+        api.hooks = async () => [row({history: [
+            {at: "2026-11-26T10:00:00+09:00", outcome: "discarded",
+             summary: null, reason: "input_unavailable", run_id: null},
+            {at: "2026-11-26T10:01:00+09:00", outcome: "skipped",
+             summary: null, reason: "expired", run_id: null},
+            {at: "2026-11-26T10:02:00+09:00", outcome: "error",
+             summary: null, reason: "needs_settings", run_id: null}]})];
+        show(api);
+        fireEvent.click(await screen.findByTestId(`plugin-row-${WEBHOOK}`));
+        const items = await screen.findAllByTestId("plugin-hook-history-item");
+        const text = items.map((i) => i.textContent).join("|");
+        expect(text).toContain("could not be prepared");
+        expect(text).toContain("went stale");
+        expect(text).toContain("Settings are needed");
+    });
+
     test("outside the desktop the detail, and so the hooks, are not drawn", async () => {
         mockAccess = "elsewhere";
         const api = createMockPluginsApi();

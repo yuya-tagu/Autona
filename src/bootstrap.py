@@ -655,6 +655,7 @@ def bootstrap_core(headless=False):
         PluginHooks.instance = PluginHooks(
             userData, PluginRegistry.instance, PluginJobs.instance.Start,
             busy=lambda: PluginJobs.instance.BusyFor(Lane.LIGHT) is not None,
+            userWaiting=lambda: PluginJobs.instance.UserWaiting(Lane.LIGHT),
             settings=_plugin_hook_settings,
             resolvePick=ShellPicks.instance.Resolve,
             samplesDir=samplesDir)

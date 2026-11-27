@@ -1740,5 +1740,12 @@
     "plugins_hook_outcome_overwritten": "上書き",
     "plugins_hook_outcome_discarded": "破棄",
     "plugins_hook_outcome_skipped_rate_limit": "スキップ（上限）",
-    "plugins_hook_outcome_needs_settings": "設定が要ります"
+    "plugins_hook_outcome_needs_settings": "設定が要ります",
+    "plugins_reason_expired": "待っている間に古くなったため実行しませんでした。",
+    "plugins_reason_unusable": "このジョブは今の状態では使えません。",
+    "plugins_reason_invalid_params": "保存した値が項目に合いません。",
+    "plugins_reason_start_failed": "ジョブを開始できませんでした。",
+    "plugins_reason_input_unavailable": "入力を用意できなかったため破棄しました。",
+    "plugins_hook_load_failed": "フックの状態を読めませんでした。表示は古いかもしれません。",
+    "plugins_hook_sample_running": "サンプルを実行中…"
 }

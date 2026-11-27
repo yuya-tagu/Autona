@@ -136,7 +136,8 @@ class _Env:
             str(tmp / "user_data"), registry, self.jobs.Start,
             busy=lambda: self.jobs.BusyFor(Lane.LIGHT) is not None,
             settings=lambda pluginId: {}, clock=self.clock,
-            samplesDir=samplesDir)
+            samplesDir=samplesDir,
+            userWaiting=lambda: self.jobs.UserWaiting(Lane.LIGHT))
 
     def Status(self, key):
         return next(s for s in self.hooks.Status(PLUGIN) if s.key == key)
@@ -293,3 +294,51 @@ def test_a_sample_run_that_succeeded_stays_readable(env):
     # The keeping rules ran (the end's _Prune) and left it; not listed.
     assert record.run_id not in [run.run_id
                                  for run in env.jobs.List(PLUGIN)]
+
+
+def test_a_result_image_gone_before_its_start_keeps_the_hook_on(env):
+    # The real input check refuses it (INPUT_UNAVAILABLE): discarded, not
+    # params_changed; the lane given back.
+    env.hooks.SetEnabled(PLUGIN, IMAGE_KEY, True, {})
+    bootstrap._result_image_saved(str(env.out / "results" / "gone.png"))
+    env.hooks.Pump()
+    status = env.Status(IMAGE_KEY)
+    assert status.enabled and status.disabled_reason is None
+    [item] = status.history
+    assert item.outcome == HookOutcome.DISCARDED
+    assert item.reason == "input_unavailable"
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+
+
+def test_a_request_refused_busy_goes_before_the_pending_hook(env):
+    # D.3 over the real runs: the user pressed while the lane was held; when
+    # it frees the hook waits the grace, and the request pressed again wins.
+    from src.core.PluginTypes import InputPick, Trigger, TriggerKind
+    from src.core.PluginHooks import USER_GRACE_SECONDS
+    env.hooks.SetEnabled(PLUGIN, IMAGE_KEY, True, {})
+    image = env.out / "results" / "top8.png"
+    image.write_bytes(b"\x89PNG")
+
+    def manual():
+        return env.jobs.Start(
+            PLUGIN, "post_image", Trigger(kind=TriggerKind.MANUAL),
+            {"mode": "slow"}, {},
+            {"image": InputPick("image", "result_image", choice="top8.png")})
+    first = manual()
+    env.hooks.ResultImageSaved(str(image))
+    env.hooks.Pump()
+    assert env.Status(IMAGE_KEY).pending
+    assert manual().reason.value == "busy"
+    assert env.jobs.Cancel(PLUGIN, first.run_id)
+    assert _until(lambda: env.jobs.UserWaiting(Lane.LIGHT))
+    env.hooks.Pump()
+    assert env.jobs.BusyFor(Lane.LIGHT) is None
+    assert env.Status(IMAGE_KEY).pending
+    # Pressed again within the grace: the user's run takes the lane.
+    again = manual()
+    assert again.run_id
+    env.clock.t += USER_GRACE_SECONDS
+    env.hooks.Pump()
+    assert env.Status(IMAGE_KEY).history == ()
+    assert env.jobs.Cancel(PLUGIN, again.run_id)
+    assert env.Settled(IMAGE_KEY, 1), "the pending hook never started"
