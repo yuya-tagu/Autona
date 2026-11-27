@@ -16,6 +16,7 @@ import {
 } from "../api";
 import {
     DevState,
+    HookRow,
     InputChoice,
     InstallStatus,
     PickResult,
@@ -93,6 +94,14 @@ export interface PluginsApi {
     // Shell requests: null when the dialog was closed.
     pickFile(extensions: string[]): Promise<PickResult | null>;
     pickFolder(): Promise<PickResult | null>;
+    // Hooks (P7, SHELL): the plugin's hook rows, enable / disable with the
+    // values the hook runs with (a file / folder value is a pick id), and a
+    // dev plugin's sample run.
+    hooks(id: string): Promise<HookRow[]>;
+    setHook(id: string, jobId: string, on: string, enabled: boolean,
+            params?: Record<string, unknown>): Promise<HookRow>;
+    hookSample(id: string, jobId: string,
+               on: string): Promise<{run_id: string}>;
     openLink(source: "installed", id: string,
              link: "homepage" | "funding"): Promise<void>;
 }
@@ -183,6 +192,13 @@ export const httpPluginsApi: PluginsApi = {
     removalInfo: (id) => data<RemovalInfo>(`${BASE}/${enc(id)}/removal`),
     startRemoval: async (id, body) => JSON.parse(await apiPost(
         `${BASE}/${enc(id)}:remove`, body)).data,
+    hooks: (id) => data<HookRow[]>(`${BASE}/${enc(id)}/hooks`),
+    setHook: async (id, jobId, on, enabled, params) => JSON.parse(
+        await apiPut(`${BASE}/${enc(id)}/hooks/${enc(jobId)}/${enc(on)}`,
+                     enabled ? {enabled, params: params ?? {}} : {enabled}))
+        .data,
+    hookSample: async (id, jobId, on) => JSON.parse(await apiPost(
+        `${BASE}/${enc(id)}/hooks/${enc(jobId)}/${enc(on)}:sample`)).data,
     pickFile: (extensions) => {
         const argument = pickFileArgument(extensions);
         if (argument === null) {

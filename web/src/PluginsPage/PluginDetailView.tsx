@@ -18,6 +18,7 @@ import {
 } from "./pluginText";
 import FieldForm from "./FieldForm";
 import PluginManage, {canManage} from "./PluginManage";
+import HooksSection from "./HooksSection";
 import {
     FormValues,
     collectValues,
@@ -32,9 +33,8 @@ import RunView, {
 } from "./RunView";
 
 // One plugin's page (ADR-009 D4): its settings, its jobs with their forms,
-// the running job's progress, the past jobs, and what it declares. The
-// hooks, the install and the listing are later stages' (P7 / P5): no place
-// is drawn for them yet.
+// the running job's progress, its hooks (HooksSection, P7), the past jobs and
+// what it declares. The install and the listing are P5's.
 
 // The built-in vodsplit (ADR-009 D9): its page is the archive page (D4).
 const BUILTIN_VODSPLIT_ID = "taguyan.vodsplit";
@@ -501,6 +501,9 @@ export default function PluginDetailView({api, id, language, onChanged,
                              onCancel={cancel} onError={onError}/>
                 ) : null}
             </CardFrame>
+
+            <HooksSection key={plugin.id} api={api} plugin={plugin}
+                          language={language} onError={onError}/>
 
             <CardFrame title={i18n.t("plugins_history")}>
                 {runs.length === 0 ? (
