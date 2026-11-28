@@ -269,3 +269,34 @@ export interface RemoveBody {
     data: boolean;
     runs: "delete" | "keep_out" | "keep";
 }
+
+// A job hook's row (GET /api/v1/plugins/<id>/hooks, ADR-009 D.6; the core's
+// _HookJson). `params` holds the saved values of the job's value fields as
+// SettingValues (a file / folder by its name).
+export interface HookHistoryEntry {
+    at: string;
+    // done | error | failed | cancelled | overwritten | discarded |
+    // skipped_rate_limit | needs_settings
+    outcome: string;
+    summary: PluginText | null;
+    reason: string | null;
+    run_id: string | null;
+}
+
+export interface HookRow {
+    // "<job id>/<on>"
+    key: string;
+    job: string;
+    on: string;
+    enabled: boolean;
+    params: Record<string, SettingValue>;
+    pending: boolean;
+    failures: number;
+    // user | rate_limit | failures | reconsent | new_install | blocked |
+    // removed | params_changed
+    disabled_reason: string | null;
+    last_error: {
+        code: string; message: PluginText; hint?: PluginText | null;
+    } | null;
+    history: HookHistoryEntry[];
+}

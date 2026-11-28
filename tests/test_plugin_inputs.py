@@ -283,6 +283,36 @@ def test_the_triggers_image_is_taken_from_its_folder_only(host, tmp_path):
                 "image", FieldType.RESULT_IMAGE, path=str(path)))
 
 
+def test_a_sample_image_is_taken_from_the_golden_inputs(host, tmp_path):
+    # A dev plugin's sample run of a result_image_saved hook hands the
+    # stand-in image of the golden inputs (ADR-009 D.6): taken as a
+    # trigger's path, never as a choice, and only inside samplesDir.
+    service = PluginInputs(
+        outDir=str(host.out), matchLogDir=str(host.log),
+        workDir=lambda: str(host.work), publishedState=lambda: {},
+        flushMatchLog=lambda: True, openRecordDate=lambda: None,
+        samplesDir=str(GOLDEN))
+    sample = GOLDEN / "result_image.png"
+    placed = service.Prepare("image", FieldType.RESULT_IMAGE,
+                             str(host.inputs), _pick(
+                                 "image", FieldType.RESULT_IMAGE,
+                                 path=str(sample)))
+    assert Path(placed.path).read_bytes() == sample.read_bytes()
+    assert placed.sha256 == hashlib.sha256(sample.read_bytes()).hexdigest()
+    elsewhere = tmp_path / "elsewhere.png"
+    elsewhere.write_bytes(b"x")
+    for pick in (_pick("image", FieldType.RESULT_IMAGE, path=str(elsewhere)),
+                 _pick("image", FieldType.RESULT_IMAGE,
+                       choice="result_image.png")):
+        with pytest.raises(InputError):
+            service.Prepare("image", FieldType.RESULT_IMAGE,
+                            str(host.inputs), pick)
+    # Without samplesDir (the default) the golden image is refused too.
+    with pytest.raises(InputError):
+        host.prepare("image", FieldType.RESULT_IMAGE, _pick(
+            "image", FieldType.RESULT_IMAGE, path=str(sample)))
+
+
 @pytest.mark.parametrize("choice", [
     "gone.png", "../secret.png", "..\\secret.png", "sub/top8.png",
     ".hidden.png", "notes.txt", "",

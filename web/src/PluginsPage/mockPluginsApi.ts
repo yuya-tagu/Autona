@@ -2,6 +2,7 @@ import {PluginsApi} from "./pluginsApi";
 import {
     ConsentSheet,
     DevState,
+    HookRow,
     InstallStatus,
     PluginDetail,
     PluginListItem,
@@ -64,7 +65,10 @@ const WEBHOOK: PluginDetail = {
              {key: "folder", type: "folder",
               label: {ja: "保存先", en: "Folder"}},
              {key: "count", type: "number", min: 1, max: 10, step: 1,
-              default: 3, label: {ja: "件数", en: "Count"}}]},
+              default: 3, label: {ja: "件数", en: "Count"}}],
+         hooks: [{on: "match_decided",
+                  label: {ja: "試合が決まったらログを書く",
+                          en: "Write the log when a match is decided"}}]},
     ],
 };
 
@@ -119,6 +123,7 @@ export function createMockPluginsApi(
         [WEBHOOK, DEV].map((d) => [d.id, clone(d)]));
     const runs = new Map<string, {record: PluginRun; reads: number}[]>();
     let dev: DevState = {enabled: false, folders: []};
+    const hookRows = new Map<string, HookRow[]>();
     let serial = 0;
 
     const need = (id: string): PluginDetail => {
@@ -285,6 +290,52 @@ export function createMockPluginsApi(
         },
         pickFile: async () => ({id: "pick-file-1", name: "picked.png"}),
         pickFolder: async () => ({id: "pick-folder-1", name: "MyFolder"}),
+        hooks: async (id) => clone(hookRows.get(id) ?? []),
+        setHook: async (id, jobId, on, enabled, params) => {
+            need(id);
+            const rows = hookRows.get(id) ?? [];
+            const key = `${jobId}/${on}`;
+            const row: HookRow = rows.find((r) => r.key === key) ?? {
+                key, job: jobId, on, enabled: false, params: {},
+                pending: false, failures: 0, disabled_reason: null,
+                last_error: null, history: []};
+            row.enabled = enabled;
+            // The real shape: SettingValues, a file / folder by its name;
+            // null resets to the default (the field is dropped).
+            if (enabled) {
+                const kept = {...row.params};
+                const job = need(id).jobs.find((j) => j.id === jobId);
+                for (const [k, v] of Object.entries(params ?? {})) {
+                    const type = job?.params?.find((f) => f.key === k)?.type;
+                    if (v === null) {
+                        delete kept[k];
+                    } else if (type === "file" || type === "folder") {
+                        kept[k] = {kind: "pick", name: String(v)};
+                    } else {
+                        kept[k] = {kind: "value", value: v};
+                    }
+                }
+                row.params = kept;
+            }
+            row.disabled_reason = enabled ? null : "user";
+            hookRows.set(id, [...rows.filter((r) => r.key !== key), row]);
+            return clone(row);
+        },
+        hookSample: async (id, jobId) => {
+            serial += 1;
+            const runId = `20261126-20000${serial}-cd${serial}z`;
+            const record: PluginRun = {
+                run_id: runId, plugin: id, job: jobId,
+                trigger: {kind: "hook", target: null}, lane: "light",
+                state: "done", reason: null,
+                started_at: "2026-11-26T10:00:00+09:00",
+                finished_at: "2026-11-26T10:00:01+09:00", exit_code: 0,
+                stage: null, progress: null, log: null, warnings: [],
+                summary: "Sample done", artifacts: [], error: null,
+                cancel_requested: false};
+            runs.set(id, [{record, reads: 0}, ...(runs.get(id) ?? [])]);
+            return {run_id: runId};
+        },
         openLink: async () => undefined,
     };
 }

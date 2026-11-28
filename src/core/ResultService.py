@@ -859,9 +859,11 @@ class ResultService(RenderLane):
 
     def __init__(self, later, render=None, locale=None, prune=None,
                  shuttingDown=None, fetcher=None, refreshTournament=None,
-                 currentProvider=None):
-        """`later`, `render`, `prune` and `shuttingDown` as RenderLane takes
-        them; `render` is given (data, config, layout). `locale()` -> the
+                 currentProvider=None, saved=None):
+        """`later`, `render`, `prune`, `shuttingDown` and `saved` as
+        RenderLane takes them; `render` is given (data, config, layout);
+        `saved(path)` is the plugin hooks' result_image_saved (ADR-009
+        D.2), one per result image saved to out/results. `locale()` -> the
         program's locale is the language of the service's own words
         (core/CoreWords) and of the sample's characters' names.
         `fetcher(job, status)` runs job(provider) on the
@@ -883,7 +885,7 @@ class ResultService(RenderLane):
         self._importLock = threading.Lock()
         self._importing = False
 
-        super().__init__(later, render, prune, shuttingDown)
+        super().__init__(later, render, prune, shuttingDown, saved)
 
     # ── the layout ───────────────────────────────────────────────────────
 

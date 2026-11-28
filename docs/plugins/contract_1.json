@@ -190,7 +190,7 @@
     "rejected": ["outside_out_dir", "symlink_or_junction", "hard_link", "missing", "not_a_file", "too_large", "bad_extension", "unknown_kind"],
     "checked": ["at_done", "at_serve"],
     "rejected_note": "A rejected artifact is dropped and a host warning is added to the job. An image over max_bytes or with another extension is rejected; a text over max_bytes is rejected. Served with a fixed Content-Type and X-Content-Type-Options: nosniff, on SHELL routes only.",
-    "hook_runs": "a hook's job folder is removed when it ends (but the last failed one): no artifact is kept, the history keeps the summary"
+    "hook_runs": "a hook's job folder is removed when it ends (but the last failed one): no artifact is kept, the history keeps the summary. A dev plugin's sample run (PluginHooks.TrySample) is kept like a manual run (its folder and artifacts; counted in runs_kept_per_plugin; not in the runs list, read by its run_id)"
   },
 
   "exit_codes": {
@@ -581,7 +581,7 @@
     "match_decided_candidates": "MatchCandidate again for a record waiting: the line is replaced, the wait keeps counting from the first candidate. The dispatcher keeps the fired mark per record; a candidate of a fired record is ignored. MatchWithdrawn cancels the wait without marking.",
     "history_outcomes": ["done", "error", "failed", "cancelled", "overwritten", "discarded", "skipped_rate_limit", "needs_settings"],
     "disabled_reasons": ["user", "rate_limit", "failures", "reconsent", "new_install", "blocked", "removed", "params_changed"],
-    "disabled_reasons_note": "user: the user turned it off. rate_limit, failures, params_changed: the dispatcher, for that hook only (params_changed: a saved value no longer fits the job's fields -- an update changed them -- or the start was refused invalid_request; the user confirms the values again). reconsent, new_install, blocked, removed: PluginHooks.Forget, for every hook of the plugin (reconsent and new_install put the values back to the defaults and the failures to 0; new_install also clears the history and the last error: another plugin now; removed comes before its user_data folder goes). A plugin's own disable leaves its hooks as they are: a pending one is discarded when it would start (disabled).",
-    "order": "trigger -> held when the light lane is full (overwrite) -> before the start the 60 s window (skip or start) -> after the start the 1 h window (disable when over)"
+    "disabled_reasons_note": "user: the user turned it off. rate_limit, failures, params_changed: the dispatcher, for that hook only (params_changed: a saved value no longer fits the job's fields -- an update changed them -- or the start was refused invalid_request; the user confirms the values again; a refusal whose detail starts input_unavailable -- the trigger's input could not be filled -- is not one: the history says discarded / input_unavailable and the hook stays on). reconsent, new_install, blocked, removed: PluginHooks.Forget, for every hook of the plugin (reconsent and new_install put the values back to the defaults and the failures to 0; new_install also clears the history and the last error: another plugin now; removed comes before its user_data folder goes). A plugin's own disable leaves its hooks as they are: a pending one is discarded when it would start (disabled).",
+    "order": "trigger -> held when the light lane is full (overwrite; when the lane frees after a manual / action start was refused busy, the pending hooks wait 5 s for that request first) -> before the start the 60 s window (skip or start) -> after the start the 1 h window (disable when over)"
   }
 }

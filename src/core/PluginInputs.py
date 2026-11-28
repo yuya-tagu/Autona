@@ -43,8 +43,13 @@ job folder) is taken only inside its own folder: an image inside
 out/results or out/thumbnails (its type's), an export's job folder directly
 in the work folder (its clips folder and clips inside it). "Inside" is
 after resolving links and junctions, and never the folder itself
-(ArchiveJobService._Under's rule). Nothing is read from anywhere else, and
-``inputsDir`` must be inside the work folder (not the work folder itself).
+(ArchiveJobService._Under's rule). One more folder an image may come from:
+``samplesDir``, the host's own golden inputs (docs/plugins/inputs/, shipped
+under _internal/ in a release), which a dev plugin's 'try with the sample
+input' of a result_image_saved hook hands over (PluginHooks.TrySample,
+ADR-009 D.6: the stand-in result_image.png). Nothing is read from anywhere
+else, and ``inputsDir`` must be inside the work folder (not the work folder
+itself).
 
 ``archive_export`` (shape not settled by the contract: ADR-009 B.3 leaves
 it to P3 and the YouTube ADR; this is the least one, ``format`` 1, to be
@@ -153,8 +158,12 @@ class PluginInputs:
                  publishedState: Callable[[], Mapping[str, Any]],
                  flushMatchLog: Callable[[], Any],
                  openRecordDate: Callable[[], Optional[datetime.date]],
-                 today: Optional[Callable[[], datetime.date]] = None):
+                 today: Optional[Callable[[], datetime.date]] = None,
+                 samplesDir: Optional[str] = None):
         self.outDir = os.path.abspath(outDir)
+        # The golden inputs a sample run's image may come from (None: none).
+        self.samplesDir = (os.path.abspath(samplesDir)
+                           if samplesDir is not None else None)
         self.matchLogDir = os.path.abspath(matchLogDir)
         self._workDir = workDir
         self._publishedState = publishedState
@@ -424,8 +433,12 @@ class PluginInputs:
             return None
         if os.path.splitext(path)[1].lower() not in IMAGE_EXTENSIONS:
             raise InputError("not a png / jpg")
-        if os.path.islink(path) or not os.path.isfile(path) \
-                or not _Under(folder, path):
+        # A trigger's own path may also be one of the host's golden inputs
+        # (a sample run); a choice is always a file of its folder.
+        inside = _Under(folder, path) or (
+            pick.choice is None and self.samplesDir is not None
+            and _Under(self.samplesDir, path))
+        if os.path.islink(path) or not os.path.isfile(path) or not inside:
             raise InputError("no such image")
         return path
 

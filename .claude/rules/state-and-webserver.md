@@ -156,7 +156,7 @@ paths:
 | `MatchNameCandidates` | `.instance` | match バーの候補（state に入れない） |
 | `StreamService` | `.instance` | 配信設定のすべて |
 | `MatchLogService` | `.instance` | ボード 1 の公開を `user_data/match_log` に記録（ADR-006 A2）。match_decided の候補と取り消しを配り役へ（ADR-009 付録 D.1） |
-| `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト（テンプレート・レイアウトの一覧は `LayoutCatalog` のテンプレートパッケージ。コードに表を持たない。ADR-007 T1） |
+| `ThumbnailService` / `ResultService`（基底 `RenderLane`） | `.instance` | 試合サムネイル / 大会リザルト（テンプレート・レイアウトの一覧は `LayoutCatalog` のテンプレートパッケージ。コードに表を持たない。ADR-007 T1）。リザルトの保存 1 枚ごとに `saved(path)` で配り役へ（result_image_saved。ADR-009 付録 D.2） |
 | `AppSettings` / `HotkeyRules` | `.instance` / モジュール関数 | 設定ページの表 / ホットキーの規則 |
 | `AssetPackService` | `.instance` | ゲームアセットのパックの導入・取り込み |
 | `PlayerDirectory` | モジュール関数 | 選手リストの行と記録の保存・削除（state は書かない） |

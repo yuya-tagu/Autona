@@ -40,6 +40,7 @@ guards the lane's own fields, and neither is held across a render or a job.
 
 Import side effects: none (pitfalls #1).
 """
+import os
 import threading
 import time
 from pathlib import Path
@@ -179,7 +180,8 @@ class RenderLane:
     # found one of these lets the preview be drawn after all.
     MISSING_CODES = ()
 
-    def __init__(self, later, render, prune=None, shuttingDown=None):
+    def __init__(self, later, render, prune=None, shuttingDown=None,
+                 saved=None):
         """`later(fn)` runs `fn` on the main thread once its event loop is
         back (never right away). `render(kind, payload, done)` starts drawing
         `payload` and returns; `done(encode, error)` comes later, once, on the
@@ -190,11 +192,15 @@ class RenderLane:
         keep, protect=)` drops the oldest images (None: none are dropped).
         `shuttingDown()` says whether a render that could not start was
         stopped by the shutdown (None: whether the task executor is
-        stopping)."""
+        stopping). `saved(path)` is told of each generated image saved (its
+        absolute path, the PNG), once its run's result is published, outside
+        every lock (the plugin hooks' result_image_saved, ADR-009 D.2: it
+        only queues); None tells nobody. A failure of it is logged."""
         self._later = later
         self._render = render
         self._prune = prune
         self._shuttingDown = shuttingDown or _ExecutorStopping
+        self._saved = saved
 
         # The lane: what runs (PREVIEW / GENERATE / None), the revision of the
         # run that has not ended yet (None once its end is on its way), what
@@ -535,6 +541,14 @@ class RenderLane:
                             "preview the generate stood in for")
             if following is not None:
                 self._QueueRun(following, followingRevision)
+        # A generated image saved (a preview's DONE carries no path).
+        if (status == DONE and kind == GENERATE and value is not None
+                and self._saved is not None):
+            try:
+                self._saved(os.path.abspath(value))
+            except Exception as error:
+                logger.warning(f"{self.LOG_NAME}: the saved image could not "
+                               f"be told ({type(error).__name__})")
 
     def _QueueRun(self, kind, revision):
         try:

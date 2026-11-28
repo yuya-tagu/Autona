@@ -131,9 +131,9 @@
     {"method": "GET", "path": "/api/v1/plugins/<plugin_id>/hooks", "endpoint": "api_v1.get_plugin_hooks", "access": "shell", "stage": "P7",
      "purpose": "The plugin's hooks: enabled, saved values, pending, counts, failures, the disable reason and the history (20 each; the last failed run's run_id for its log)."},
     {"method": "PUT", "path": "/api/v1/plugins/<plugin_id>/hooks/<job_id>/<on>", "endpoint": "api_v1.plugin_hook_update", "access": "shell", "stage": "P7",
-     "purpose": "Enable / disable a hook with the values it runs with: {enabled, params} (a file / folder value is a pick id). Desktop only."},
+     "purpose": "Enable / disable a hook with the values it runs with: {enabled, params} (a file / folder value is a pick id; a file / folder key left out of params keeps the path saved before, a missing other key is its default; params is ignored when disabling). Answers the hook's row. Desktop only."},
     {"method": "POST", "path": "/api/v1/plugins/<plugin_id>/hooks/<job_id>/<on>:sample", "endpoint": "api_v1.plugin_hook_sample", "access": "shell", "stage": "P7",
-     "purpose": "A dev plugin only: run the hook once with the golden input (not counted)."}
+     "purpose": "A dev plugin only: run the hook once with the golden input (not counted). Answers 201 {run_id}; the run is kept like a manual one, so GET runs/<run_id> and its log answer after it ends."}
   ],
   "shell_verbs": [
     {"verb": "pickFolder", "stage": "P2",

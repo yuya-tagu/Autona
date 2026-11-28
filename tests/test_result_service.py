@@ -1934,6 +1934,27 @@ def test_a_generate_saves_the_file_and_the_players(env, executor):
     assert env.service.PreviewImage() == b"an image.PNG"
 
 
+def test_each_saved_image_is_told_once_and_a_preview_never(env, executor):
+    # The plugin hooks' result_image_saved (ADR-009 D.2): the saved PNG's
+    # absolute path, once its result is published; a preview saves nothing.
+    told = []
+    env.service._saved = lambda path: told.append(
+        (path, env.render()["status"]))
+    SM.state = {"tournamentInfo": {"tournamentName": "Cup"}}
+    _named("Alpha")
+
+    env.service.Preview()
+    env.renderer.answer()
+    executor.run_next(WAIT)
+    assert told == []
+
+    env.service.Generate()
+    env.renderer.answer()
+    executor.run_next(WAIT)
+    render = env.render()
+    assert told == [(os.path.abspath(render["path"]), results.DONE)]
+
+
 def test_a_generate_without_data_is_refused_and_changes_nothing(env, executor):
     SM.state = {"tournamentInfo": {"tournamentName": "Cup"}}
 

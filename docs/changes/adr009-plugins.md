@@ -36,7 +36,8 @@
 - [x] I1a（#399）→ I1b（#400）＋I2（#401）→ **M1** 実機・exe 1 回・verify 全量（済。exe からのワーカー起動での Defender の反応と vodsplit の中止は未確認 → M3 の exe とオーナーの実 VOD で）
 - [x] I3（#402）アクション「プラグイン ▾」・secret・webhook（ローカルフォルダ）→ **M2**（P3）（済。ループバックで画像送信まで確認。Discord への実送信はオーナー）
 - [x] M2 直後: Autona-releases に空の `plugins.json`（Autona-releases#2）、`yuya-tagu/autona-webhook` を作成（非公開。I6 で公開・掲載）
-- [ ] I4 導入・同意・遮断（実装済み・PR 中。ArchiveWorkerInstaller の ZipSafety 化は見送り）→ **M3**（P5a）実機・exe 1 回 → I5 フック → **M4**（P7）→ I6 掲載 → **M5**（P5b・告知可）→ I7 更新 → **M6**（P6）
+- [x] I4 導入・同意・遮断（#403・#404。ArchiveWorkerInstaller の ZipSafety 化は見送り）→ **M3**（P5a）（済。導入・同意・無効化・更新・実行中の削除を実機で、exe からのワーカー起動で Defender の検出なしを確認。BUSY と遮断リストと「外へ残す」は実機未確認）
+- [ ] I5 フック（PR 中） → **M4**（P7）→ I6 掲載 → **M5**（P5b・告知可）→ I7 更新 → **M6**（P6）
 - [ ] 各節目で verify 全量 1 回
 
 ## 止まる条件

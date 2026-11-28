@@ -99,23 +99,32 @@ class _Jobs:
     def __init__(self):
         self.calls = []
         self.busy = False
-        # A refusal to answer (instead of a run), once.
+        # A refusal to answer (instead of a run), once: a StartRefusal or
+        # a Refused.
         self.refuse = None
+        # The state of the record it answers (CANCELLED: one cancelled
+        # while being prepared).
+        self.endState = JobState.RUNNING
         self.started = threading.Event()
+        # The run ids started with sample=True.
+        self.sampled = []
 
-    def start(self, pluginId, jobId, trigger, params, settings, picks):
+    def start(self, pluginId, jobId, trigger, params, settings, picks, *,
+              sample=False):
         if self.busy:
             return Refused(StartRefusal.BUSY, remaining_seconds=3)
         if self.refuse is not None:
             refused, self.refuse = self.refuse, None
-            return Refused(refused)
+            return refused if isinstance(refused, Refused)                 else Refused(refused)
         runId = f"20261126-000000-{len(self.calls):04d}"
         self.calls.append((pluginId, jobId, trigger, dict(params),
                            dict(settings), dict(picks), runId))
+        if sample:
+            self.sampled.append(runId)
         self.started.set()
         return RunRecord(run_id=runId, plugin=pluginId, job=jobId,
                          trigger=trigger, lane=Lane.LIGHT,
-                         state=JobState.RUNNING,
+                         state=self.endState,
                          started_at="2026-11-26T00:00:00+09:00")
 
 
@@ -647,6 +656,8 @@ def test_a_dev_plugin_tries_the_golden_input_uncounted(setup):
     assert call[5]["match"].record == golden
     assert call[3] == {"style": "short"}
     assert call[2].hook == MATCH_KEY
+    # Marked a sample: PluginJobs keeps its folder like a manual run's.
+    assert jobs.sampled == [record.run_id]
     dispatcher.RunEnded(PLUGIN, MATCH_KEY,
                         _record(record.run_id, JobState.FAILED,
                                 reason=EndReason.ABNORMAL_EXIT))
@@ -1056,6 +1067,39 @@ def test_a_file_value_is_a_pick_id(setup, tmp_path):
     assert jobs.calls[0][3]["logo"] == os.path.normpath(str(picked))
 
 
+def test_a_file_value_left_out_keeps_the_saved_path(setup, tmp_path):
+    # The page shows a saved file by its name and sends a pick id only when
+    # the user picks again: a file / folder key left out of an enable keeps
+    # the path saved before (not the default); one given replaces it.
+    registry, jobs, clock, make, _ = setup
+    first, second = tmp_path / "a.png", tmp_path / "b.png"
+    first.write_bytes(b"png")
+    second.write_bytes(b"png")
+    plugin = registry.plugins[PLUGIN]
+    manifest = plugin.report.manifest
+    image = manifest.jobs[1]
+    image = dataclasses.replace(image, params=image.params + (
+        Field(key="logo", type="file", label="Logo", extensions=("png",)),))
+    registry.plugins[PLUGIN] = dataclasses.replace(
+        plugin, report=ManifestReport(dataclasses.replace(
+            manifest, jobs=(manifest.jobs[0], image))))
+    picks = {"pick-1": str(first), "pick-2": str(second)}
+    dispatcher = make(resolvePick=lambda kind, pickId: picks.get(pickId))
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-1"})
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, False, {})
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"count": 2})
+    assert status.params["logo"] == os.path.normpath(str(first))
+    assert status.params["count"] == 2
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": "pick-2"})
+    assert status.params["logo"] == os.path.normpath(str(second))
+    # An explicit null is not "left out": the default (none) again.
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {"logo": None})
+    assert status.params["logo"] is None
+    # The start runs with the values saved last.
+    _run_once(dispatcher, clock, 0)
+    assert jobs.calls[0][3]["logo"] is None
+
+
 # ── Refresh, samples, unusable, Forget (review S8) ──────────────────────
 
 def test_refresh_keeps_the_pending_trigger_and_the_windows(setup):
@@ -1132,3 +1176,184 @@ def test_forget_puts_the_values_back_only_for_a_new_consent(
     fresh = reason == HookDisabledReason.NEW_INSTALL
     assert (status.history == ()) == fresh
     assert (status.last_error is None) == fresh
+
+
+# ── review fixes (I5) ───────────────────────────────────────────────────
+
+def test_the_users_request_goes_first_when_the_lane_frees(setup):
+    # D.3: a manual / action start was refused BUSY while the lane was
+    # held; once it frees the pending hooks wait the grace, so the request
+    # pressed again takes the lane.
+    registry, jobs, clock, make, _ = setup
+    waiting = {"user": False}
+    dispatcher = _enabled(make, IMAGE_KEY)
+    dispatcher._userWaiting = lambda: waiting["user"]
+    jobs.busy = True
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    # The run ends; a manual start had been refused meanwhile.
+    jobs.busy, waiting["user"] = False, True
+    dispatcher.LaneFreed()
+    dispatcher.Pump()
+    assert jobs.calls == []
+    assert dispatcher._NextDue() == clock.t + hooks_module.USER_GRACE_SECONDS
+    clock.t += hooks_module.USER_GRACE_SECONDS - 0.1
+    dispatcher.Pump()
+    assert jobs.calls == []
+    # The user pressed again: the lane is theirs, the hook stays pending.
+    jobs.busy, waiting["user"] = True, False
+    dispatcher.Pump()
+    assert jobs.calls == [] and _status(dispatcher, IMAGE_KEY).pending
+    # Their run ends with nobody refused: the hook starts at once.
+    jobs.busy = False
+    dispatcher.LaneFreed()
+    dispatcher.Pump()
+    assert len(jobs.calls) == 1
+
+
+def test_the_grace_ends_and_the_hook_starts(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    dispatcher._userWaiting = lambda: True
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    assert jobs.calls == []
+    clock.t += hooks_module.USER_GRACE_SECONDS
+    dispatcher.Pump()
+    assert len(jobs.calls) == 1
+    # Spent: a later trigger (the flag not reset by a fake lane) starts at
+    # once.
+    dispatcher.ResultImageSaved("C:\\out\\results\\b.png")
+    clock.t += 1
+    dispatcher.Pump()
+    assert len(jobs.calls) == 2
+
+
+def test_a_pending_trigger_due_to_expire_starts_when_the_lane_is_free(
+        setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    jobs.busy = True
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    jobs.busy = False
+    clock.t += hooks_module.HOOK_PENDING_MAX_SECONDS
+    dispatcher.Pump()
+    assert len(jobs.calls) == 1
+    assert _status(dispatcher, IMAGE_KEY).history == ()
+
+
+def test_an_input_that_cannot_be_filled_is_discarded_not_disabling(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    jobs.refuse = Refused(StartRefusal.INVALID_REQUEST,
+                          detail=f"{hooks_module.INPUT_UNAVAILABLE}: image "
+                                 "could not be filled")
+    dispatcher.ResultImageSaved("C:\\out\\results\\gone.png")
+    dispatcher.Pump()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert status.enabled and status.disabled_reason is None
+    assert status.failures == 0
+    [item] = status.history
+    assert item.outcome == HookOutcome.DISCARDED
+    assert item.reason == "input_unavailable"
+
+
+def test_forget_raises_when_it_cannot_save_and_refresh_keeps_it_off(
+        setup, monkeypatch):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+
+    def full(path, data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(hooks_module.ImageImport, "WriteFile", full)
+    with pytest.raises(OSError):
+        dispatcher.Forget(PLUGIN, HookDisabledReason.BLOCKED)
+    assert not dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+    # The file still says enabled; reading again keeps memory's.
+    dispatcher.Refresh()
+    status = _status(dispatcher, IMAGE_KEY)
+    assert not status.enabled
+    assert status.disabled_reason == HookDisabledReason.BLOCKED
+    # Writable again: the next read again saves it.
+    monkeypatch.undo()
+    dispatcher.Refresh()
+    saved = json.loads(_hooks_file(tmp_path).read_text(encoding="utf-8"))
+    assert saved["hooks"][IMAGE_KEY]["disabled_reason"] == "blocked"
+
+
+def test_forget_raises_when_hooks_json_cannot_be_opened(setup, monkeypatch):
+    registry, jobs, clock, make, tmp_path = setup
+    _enabled(make, IMAGE_KEY)
+    path = _hooks_file(tmp_path)
+    realOpen = open
+
+    def locked(file, *args, **kwargs):
+        if str(file) == str(path):
+            raise PermissionError("held by another process")
+        return realOpen(file, *args, **kwargs)
+
+    monkeypatch.setattr(hooks_module, "open", locked, raising=False)
+    with pytest.raises(OSError):
+        make().Forget(PLUGIN, HookDisabledReason.NEW_INSTALL)
+
+
+def test_an_auto_disable_whose_save_failed_does_not_come_back(
+        setup, monkeypatch):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    monkeypatch.setattr(hooks_module.ImageImport, "WriteFile",
+                        lambda path, data: (_ for _ in ()).throw(
+                            OSError("disk full")))
+    jobs.refuse = StartRefusal.INVALID_REQUEST
+    dispatcher.ResultImageSaved("C:\\out\\results\\a.png")
+    dispatcher.Pump()
+    assert (_status(dispatcher, IMAGE_KEY).disabled_reason
+            == HookDisabledReason.PARAMS_CHANGED)
+    dispatcher.Refresh()
+    assert not _status(dispatcher, IMAGE_KEY).enabled
+    assert not dispatcher.Wanted(HookEvent.RESULT_IMAGE_SAVED)
+
+
+def test_a_new_install_keeps_its_reason_after_user_data_is_emptied(setup):
+    registry, jobs, clock, make, tmp_path = setup
+    dispatcher = _enabled(make, IMAGE_KEY, MATCH_KEY)
+    dispatcher.Forget(PLUGIN, HookDisabledReason.NEW_INSTALL)
+    # The installer empties user_data/plugins/<id>/, then refreshes.
+    _hooks_file(tmp_path).unlink()
+    dispatcher.Refresh()
+    for status in dispatcher.Status(PLUGIN):
+        assert not status.enabled
+        assert status.disabled_reason == HookDisabledReason.NEW_INSTALL
+        assert status.history == ()
+
+
+def test_saving_the_values_of_an_enabled_hook_keeps_its_counts(setup):
+    registry, jobs, clock, make, _ = setup
+    dispatcher = _enabled(make, IMAGE_KEY)
+    _run_once(dispatcher, clock, 0)
+    dispatcher.RunEnded(PLUGIN, IMAGE_KEY,
+                        _record(jobs.calls[0][6], JobState.ERROR,
+                                error=ErrorEvent(code="x", message="m")))
+    dispatcher.Pump()
+    assert _status(dispatcher, IMAGE_KEY).failures == 1
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True,
+                                   {"message": "hi"})
+    assert status.failures == 1 and status.params["message"] == "hi"
+    assert len(dispatcher._plugins[PLUGIN].hooks[IMAGE_KEY].starts) == 1
+    # Off, then on again: a fresh start.
+    dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, False, {})
+    status = dispatcher.SetEnabled(PLUGIN, IMAGE_KEY, True, {})
+    assert status.failures == 0
+    assert len(dispatcher._plugins[PLUGIN].hooks[IMAGE_KEY].starts) == 0
+
+
+def test_a_sample_cancelled_while_prepared_is_not_waited_for(setup):
+    registry, jobs, clock, make, _ = setup
+    registry.add(badge=Badge.DEV)
+    dispatcher = make(samplesDir=str(SAMPLES))
+    jobs.endState = JobState.CANCELLED
+    record = dispatcher.TrySample(PLUGIN, MATCH_KEY)
+    assert record.state == JobState.CANCELLED
+    assert dispatcher._samples == set()
